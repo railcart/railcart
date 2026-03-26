@@ -1,0 +1,17 @@
+# Bundled Node.js binary (downloaded via scripts/setup-node.sh)
+vendor/node/
+
+# Xcode
+xcuserdata/
+*.xcscmblueprint
+DerivedData/
+
+# macOS
+.DS_Store
+
+# release signing
+scripts/release/
+
+# claude help
+CLAUDE.md
+.claude

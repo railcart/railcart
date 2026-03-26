@@ -1,0 +1,19 @@
+{
+  "name": "railcart-backend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test src/**/*.test.js"
+  },
+  "dependencies": {
+    "@railgun-community/shared-models": "^8.0.1",
+    "@railgun-community/waku-broadcaster-client-node": "^9.0.6",
+    "@railgun-community/wallet": "^10.8.4",
+    "ethers": "^6.13.0",
+    "leveldown": "^6.1.1",
+    "snarkjs": "^0.7.6"
+  }
+}
