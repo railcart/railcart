@@ -53,6 +53,22 @@ function serializeTransaction(tx) {
 
 export function registerWalletMethods() {
   /**
+   * Validate a BIP-39 mnemonic phrase.
+   *
+   * params: { mnemonic: string }
+   */
+  registerMethod("validateMnemonic", async (params) => {
+    const { mnemonic } = params;
+    if (!mnemonic) throw new Error("mnemonic is required");
+    try {
+      Mnemonic.fromPhrase(mnemonic.trim());
+      return { valid: true };
+    } catch {
+      return { valid: false };
+    }
+  });
+
+  /**
    * Generate a new BIP-39 mnemonic phrase.
    */
   registerMethod("generateMnemonic", async () => {

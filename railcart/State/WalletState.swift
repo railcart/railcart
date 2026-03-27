@@ -32,6 +32,8 @@ final class WalletState {
     /// Shared wallet state (same across all accounts from same seed).
     var mnemonic: String?
 
+    var showImportSheet = false
+
     private var lockTimer: Timer?
 
     /// The next derivation index to use when adding a new account.

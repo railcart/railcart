@@ -52,10 +52,14 @@ struct ContentView: View {
             .navigationTitle("RAILGUN")
         } detail: {
             if bridge.isReady {
-                if walletState.step == .ready, let first = walletState.accounts.first {
+                if let first = walletState.accounts.first {
                     AccountDetailView(accountID: first.id)
                 } else {
-                    WalletSetupView()
+                    ContentUnavailableView(
+                        "No Wallets",
+                        systemImage: "wallet.bifold",
+                        description: Text("Create a wallet to get started.")
+                    )
                 }
             } else if let error = bridge.errorMessage {
                 ContentUnavailableView {
@@ -74,6 +78,13 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                 }
             }
+        }
+        .sheet(isPresented: Binding(
+            get: { bridge.isReady && walletState.step != .ready },
+            set: { _ in }
+        )) {
+            WalletSetupView()
+                .interactiveDismissDisabled()
         }
         .toolbar {
             ToolbarItem(placement: .automatic) {

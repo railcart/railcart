@@ -25,8 +25,14 @@ struct RailcartApp: App {
     }
 
     var body: some Scene {
-        WindowGroup {
+        Window("railcart", id: "main") {
             ContentView()
+                .sheet(isPresented: Binding(
+                    get: { walletState.showImportSheet },
+                    set: { walletState.showImportSheet = $0 }
+                )) {
+                    ImportWalletView()
+                }
                 .environment(\.walletService, walletService)
                 .environment(\.balanceService, balanceService)
                 .environment(bridge)
@@ -43,6 +49,15 @@ struct RailcartApp: App {
                         try? await walletService.loadChainProvider(chainName: chain, providerUrl: url)
                     }
                 }
+        }
+        .commands {
+            CommandGroup(after: .newItem) {
+                Button("Import Wallet...") {
+                    walletState.showImportSheet = true
+                }
+                .keyboardShortcut("i", modifiers: [.command, .shift])
+                .disabled(walletState.step != .ready)
+            }
         }
     }
 }

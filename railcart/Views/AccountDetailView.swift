@@ -27,9 +27,7 @@ struct AccountDetailView: View {
     }
 
     var body: some View {
-        if walletState.step != .ready {
-            WalletSetupView()
-        } else if let account, let unlocked {
+        if let account, let unlocked {
             accountView(account: account, unlocked: unlocked)
         } else {
             ContentUnavailableView(
