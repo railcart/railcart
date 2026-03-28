@@ -51,6 +51,8 @@ function serializeTransaction(tx) {
   };
 }
 
+export { serializeTransaction };
+
 export function registerWalletMethods() {
   /**
    * Validate a BIP-39 mnemonic phrase.
@@ -60,11 +62,27 @@ export function registerWalletMethods() {
   registerMethod("validateMnemonic", async (params) => {
     const { mnemonic } = params;
     if (!mnemonic) throw new Error("mnemonic is required");
+
+    const words = mnemonic.trim().split(/\s+/);
+    if (words.length !== 12 && words.length !== 24) {
+      return { valid: false, error: `Expected 12 or 24 words, got ${words.length}.` };
+    }
+
+    // Check each word against the BIP-39 English wordlist
+    const wordlist = Mnemonic.fromPhrase(
+      "abandon ".repeat(11) + "about"
+    ).wordlist;
+    for (const word of words) {
+      if (wordlist.getWordIndex(word) === -1) {
+        return { valid: false, error: `"${word}" is not a valid BIP-39 word.` };
+      }
+    }
+
     try {
-      Mnemonic.fromPhrase(mnemonic.trim());
+      Mnemonic.fromPhrase(words.join(" "));
       return { valid: true };
     } catch {
-      return { valid: false };
+      return { valid: false, error: "Invalid checksum. Check that your words are in the correct order." };
     }
   });
 

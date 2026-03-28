@@ -26,7 +26,7 @@ extension EnvironmentValues {
 
 /// Crashes on any call — ensures we always inject a real implementation.
 struct UnimplementedWalletService: WalletServiceProtocol {
-    func validateMnemonic(_ mnemonic: String) async throws -> Bool { fatalError() }
+    func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation { fatalError() }
     func generateMnemonic() async throws -> String { fatalError() }
     func deriveEncryptionKey(password: String, salt: String) async throws -> String { fatalError() }
     func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int) async throws -> WalletInfoResponse { fatalError() }
@@ -42,6 +42,11 @@ struct UnimplementedWalletService: WalletServiceProtocol {
 }
 
 // MARK: - Response Types
+
+struct MnemonicValidation: Decodable, Sendable {
+    let valid: Bool
+    let error: String?
+}
 
 struct MnemonicResponse: Decodable, Sendable {
     let mnemonic: String
@@ -117,7 +122,7 @@ struct BalancesResponse: Decodable, Sendable {
 @MainActor
 protocol WalletServiceProtocol: Sendable {
     // Wallet management
-    func validateMnemonic(_ mnemonic: String) async throws -> Bool
+    func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation
     func generateMnemonic() async throws -> String
     func deriveEncryptionKey(password: String, salt: String) async throws -> String
     func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int) async throws -> WalletInfoResponse
@@ -230,12 +235,10 @@ final class LiveWalletService: WalletServiceProtocol {
         return txHash
     }
 
-    func validateMnemonic(_ mnemonic: String) async throws -> Bool {
-        struct ValidationResult: Decodable { let valid: Bool }
-        let result = try await bridge.call("validateMnemonic", params: [
+    func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation {
+        try await bridge.call("validateMnemonic", params: [
             "mnemonic": mnemonic,
-        ], as: ValidationResult.self)
-        return result.valid
+        ], as: MnemonicValidation.self)
     }
 
     func generateMnemonic() async throws -> String {

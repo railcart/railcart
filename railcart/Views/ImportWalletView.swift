@@ -118,9 +118,9 @@ struct ImportWalletView: View {
         let mnemonic = normalizedMnemonic
 
         do {
-            let valid = try await service.validateMnemonic(mnemonic)
-            guard valid else {
-                errorMessage = "Invalid recovery phrase. Check your words and try again."
+            let validation = try await service.validateMnemonic(mnemonic)
+            guard validation.valid else {
+                errorMessage = validation.error ?? "Invalid recovery phrase."
                 return
             }
 
