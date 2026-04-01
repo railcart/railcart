@@ -22,9 +22,10 @@ struct Account: Codable, Identifiable, Sendable {
     // MARK: - Persistence
 
     private static let storageKey = "wallet.accounts"
+    static var defaults: UserDefaults = .standard
 
     static func loadAll() -> [Account] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = defaults.data(forKey: storageKey),
               let accounts = try? JSONDecoder().decode([Account].self, from: data) else {
             return []
         }
@@ -33,7 +34,7 @@ struct Account: Codable, Identifiable, Sendable {
 
     static func saveAll(_ accounts: [Account]) {
         if let data = try? JSONEncoder().encode(accounts) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            defaults.set(data, forKey: storageKey)
         }
     }
 }

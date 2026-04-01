@@ -78,8 +78,8 @@ final class NodeBridge {
             throw NodeBridgeError.nodeNotFound
         }
 
-        print("[NodeBridge] node: \(nodePath)")
-        print("[NodeBridge] project: \(projectPath)")
+        AppLogger.shared.log("bridge", "Node binary: \(nodePath)")
+        AppLogger.shared.log("bridge", "Project dir: \(projectPath)")
 
         let proc = Process()
         let stdin = Pipe()
@@ -127,11 +127,16 @@ final class NodeBridge {
             }
         }
 
-        // Log stderr to Xcode console
+        // Log stderr to AppLogger and Xcode console
         stderr.fileHandleForReading.readabilityHandler = { handle in
             let data = handle.availableData
             if let str = String(data: data, encoding: .utf8), !str.isEmpty {
-                print("[Node.js] \(str)", terminator: "")
+                let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    Task { @MainActor in
+                        AppLogger.shared.log("node", trimmed)
+                    }
+                }
             }
         }
 
@@ -227,7 +232,7 @@ final class NodeBridge {
     private func handleMessage(_ json: String) {
         guard let data = json.data(using: .utf8),
               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            print("[NodeBridge] Could not parse: \(json)")
+            AppLogger.shared.log("bridge", "Could not parse JSON: \(json.prefix(200))")
             return
         }
 

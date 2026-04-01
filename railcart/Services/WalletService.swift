@@ -29,14 +29,18 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation { fatalError() }
     func generateMnemonic() async throws -> String { fatalError() }
     func deriveEncryptionKey(password: String, salt: String) async throws -> String { fatalError() }
-    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int) async throws -> WalletInfoResponse { fatalError() }
+    func getBlockNumber(chainName: String) async throws -> Int { fatalError() }
+    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int, creationBlockNumbers: [String: Int]) async throws -> WalletInfoResponse { fatalError() }
     func loadWallet(encryptionKey: String, walletID: String, derivationIndex: Int) async throws -> WalletInfoResponse { fatalError() }
     func getRailgunAddress(walletID: String) async throws -> String { fatalError() }
     func getWalletMnemonic(encryptionKey: String, walletID: String) async throws -> String { fatalError() }
     func deriveEthereumKey(encryptionKey: String, walletID: String, index: Int) async throws -> DerivedEthKey { fatalError() }
     func getEthBalance(chainName: String, address: String) async throws -> String { fatalError() }
+    func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance] { fatalError() }
     func shieldBaseToken(chainName: String, railgunAddress: String, amount: String, privateKey: String) async throws -> String { fatalError() }
     func unshieldBaseToken(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
+    func scanBalances(chainName: String, walletIDs: [String]) async throws { fatalError() }
+    func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
 }
@@ -117,6 +121,10 @@ struct BalancesResponse: Decodable, Sendable {
     let balances: [TokenBalance]
 }
 
+struct ERC20BalancesResponse: Decodable, Sendable {
+    let balances: [TokenBalance]
+}
+
 // MARK: - Protocol
 
 @MainActor
@@ -125,7 +133,8 @@ protocol WalletServiceProtocol: Sendable {
     func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation
     func generateMnemonic() async throws -> String
     func deriveEncryptionKey(password: String, salt: String) async throws -> String
-    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int) async throws -> WalletInfoResponse
+    func getBlockNumber(chainName: String) async throws -> Int
+    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int, creationBlockNumbers: [String: Int]) async throws -> WalletInfoResponse
     func loadWallet(encryptionKey: String, walletID: String, derivationIndex: Int) async throws -> WalletInfoResponse
     func getRailgunAddress(walletID: String) async throws -> String
     func getWalletMnemonic(encryptionKey: String, walletID: String) async throws -> String
@@ -153,7 +162,10 @@ protocol WalletServiceProtocol: Sendable {
     ) async throws -> String // txHash
 
     // Balances
+    func scanBalances(chainName: String, walletIDs: [String]) async throws
+    func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
+    func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance]
 
     // Settings
     func loadChainProvider(chainName: String, providerUrl: String) async throws
@@ -254,11 +266,20 @@ final class LiveWalletService: WalletServiceProtocol {
         return result.encryptionKey
     }
 
-    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int) async throws -> WalletInfoResponse {
+    func getBlockNumber(chainName: String) async throws -> Int {
+        struct BlockNumberResponse: Decodable { let blockNumber: Int }
+        let result = try await bridge.call("getBlockNumber", params: [
+            "chainName": chainName,
+        ], as: BlockNumberResponse.self)
+        return result.blockNumber
+    }
+
+    func createWallet(encryptionKey: String, mnemonic: String, derivationIndex: Int, creationBlockNumbers: [String: Int]) async throws -> WalletInfoResponse {
         try await bridge.call("createWallet", params: [
             "encryptionKey": encryptionKey,
             "mnemonic": mnemonic,
             "derivationIndex": derivationIndex,
+            "creationBlockNumbers": creationBlockNumbers,
         ], as: WalletInfoResponse.self)
     }
 
@@ -300,6 +321,15 @@ final class LiveWalletService: WalletServiceProtocol {
             "address": address,
         ], as: EthBalanceResponse.self)
         return result.balance
+    }
+
+    func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance] {
+        let result = try await bridge.call("getERC20Balances", params: [
+            "chainName": chainName,
+            "address": address,
+            "tokenAddresses": tokenAddresses,
+        ], as: ERC20BalancesResponse.self)
+        return result.balances
     }
 
     func shieldBaseToken(
@@ -363,18 +393,27 @@ final class LiveWalletService: WalletServiceProtocol {
         )
     }
 
-    func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {
-        let _ = try await bridge.callRaw("scanBalances", params: [
-            "chainName": chainName,
-            "railgunWalletID": walletID,
-        ], timeout: .seconds(120))
+    func scanBalances(chainName: String, walletIDs: [String]) async throws {
+        // Pass all wallet IDs so the SDK scans the merkletree once for all wallets.
+        // If empty, the SDK scans for all loaded wallets.
+        var params: [String: any Sendable] = ["chainName": chainName]
+        if !walletIDs.isEmpty {
+            params["railgunWalletIDs"] = walletIDs
+        }
+        let _ = try await bridge.callRaw("scanBalances", params: params, timeout: .seconds(120))
+    }
 
+    func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {
         let result = try await bridge.call("getBalances", params: [
             "railgunWalletID": walletID,
             "chainName": chainName,
         ], as: BalancesResponse.self)
-
         return result.balances
+    }
+
+    func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {
+        try await scanBalances(chainName: chainName, walletIDs: [walletID])
+        return try await getPrivateBalances(chainName: chainName, walletID: walletID)
     }
 
     func loadChainProvider(chainName: String, providerUrl: String) async throws {

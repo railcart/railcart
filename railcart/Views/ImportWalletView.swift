@@ -124,10 +124,12 @@ struct ImportWalletView: View {
                 return
             }
 
+            // Imported wallets may have existing history — don't set creation blocks
             let walletInfo = try await service.createWallet(
                 encryptionKey: encryptionKey,
                 mnemonic: mnemonic,
-                derivationIndex: derivationIndex
+                derivationIndex: derivationIndex,
+                creationBlockNumbers: [:]
             )
 
             let importCount = walletState.accounts.filter { $0.name.hasPrefix("Imported Wallet") }.count

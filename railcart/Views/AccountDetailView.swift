@@ -3,20 +3,35 @@
 //  railcart
 //
 //  Detail view for a single wallet account.
+//  Split into public address (top) and private zk address (bottom) sections.
 //
 
 import SwiftUI
 
 struct AccountDetailView: View {
     @Environment(\.balanceService) private var balanceService
+    @Environment(\.walletService) private var walletService
     @Environment(WalletState.self) private var walletState
     @Environment(NetworkState.self) private var network
+    @Environment(TransactionStore.self) private var transactionStore
 
     let accountID: String
 
-    @State private var ethBalance: String?
     @State private var isEditingName = false
     @FocusState private var nameFieldFocused: Bool
+
+    // Public balances
+    @State private var ethBalance: String?
+    @State private var publicTokenBalances: [String: String] = [:]
+    @State private var isLoadingPublic = false
+
+    // Private balances (read from BalanceService cache; scanning is centralized)
+    private var privateTokenBalances: [TokenBalance] {
+        guard let account, let balanceService else { return [] }
+        return balanceService.cachedPrivateBalances(
+            chainName: network.selectedChain.rawValue, walletID: account.id
+        ) ?? []
+    }
 
     private var account: Account? {
         walletState.account(byID: accountID)
@@ -39,34 +54,63 @@ struct AccountDetailView: View {
     }
 
     private func accountView(account: Account, unlocked: Account.Unlocked) -> some View {
-        VStack(spacing: 16) {
-            Image(systemName: "checkmark.shield.fill")
-                .font(.largeTitle)
-                .foregroundStyle(.green)
+        ScrollView {
+            VStack(spacing: 0) {
+                walletHeader(account: account)
 
-            walletNameView(account: account)
+                VStack(spacing: 20) {
+                    PublicBalanceSection(
+                        ethAddress: unlocked.ethAddress,
+                        ethBalance: ethBalance,
+                        tokenBalances: publicTokenBalances,
+                        chain: network.selectedChain,
+                        isLoading: isLoadingPublic,
+                        onRefresh: { Task { await loadPublicBalances(address: unlocked.ethAddress) } }
+                    )
 
-            addressRow(label: "RAILGUN Address", address: account.railgunAddress)
-            addressRow(label: "ETH Address (\(network.selectedChain.displayName))", address: unlocked.ethAddress)
+                    let pendingShields = pendingShieldTransactions(for: account)
+                    if !pendingShields.isEmpty {
+                        PendingShieldView(transactions: pendingShields)
+                    }
 
-            if let ethBalance {
-                Text("\(ethBalance) ETH")
-                    .font(.body.monospaced())
-                    .foregroundStyle(.secondary)
+                    PrivateBalanceSection(
+                        railgunAddress: account.railgunAddress,
+                        tokenBalances: privateTokenBalances,
+                        chain: network.selectedChain,
+                        isLoading: balanceService?.isScanning ?? false,
+                        isScanning: balanceService?.isScanning ?? false,
+                        scanStep: balanceService?.scanStep,
+                        scanProgress: balanceService?.scanProgress ?? 0,
+                        errorMessage: nil,
+                        onRefresh: { Task { await refreshPrivateBalances() } }
+                    )
+                }
+                .padding(20)
             }
         }
-        .padding()
-        .frame(minWidth: 450, minHeight: 300)
-        .task { await fetchEthBalance(address: unlocked.ethAddress) }
+        .frame(minWidth: 500, minHeight: 500)
+        .task {
+            try? await network.ensureProviderLoaded(for: network.selectedChain, using: walletService)
+            await loadPublicBalances(address: unlocked.ethAddress)
+        }
         .onChange(of: network.selectedChain) {
             ethBalance = nil
-            Task { await fetchEthBalance(address: unlocked.ethAddress) }
+            publicTokenBalances = [:]
+            Task {
+                try? await network.ensureProviderLoaded(for: network.selectedChain, using: walletService)
+                await loadPublicBalances(address: unlocked.ethAddress)
+            }
         }
     }
 
-    @ViewBuilder
-    private func walletNameView(account: Account) -> some View {
-        HStack(spacing: 6) {
+    // MARK: - Header
+
+    private func walletHeader(account: Account) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.shield.fill")
+                .font(.title2)
+                .foregroundStyle(.green)
+
             if isEditingName {
                 let binding = Binding<String>(
                     get: { account.name },
@@ -78,7 +122,6 @@ struct AccountDetailView: View {
                 )
                 TextField("Wallet Name", text: binding)
                     .font(.title2.bold())
-                    .multilineTextAlignment(.center)
                     .textFieldStyle(.plain)
                     .focused($nameFieldFocused)
                     .onSubmit { isEditingName = false }
@@ -98,49 +141,116 @@ struct AccountDetailView: View {
                 }
                 .buttonStyle(.borderless)
             }
-        }
-    }
 
-    private func addressRow(label: String, address: String) -> some View {
-        VStack(spacing: 4) {
-            Text(label)
+            Spacer()
+
+            Text(network.selectedChain.displayName)
                 .font(.caption)
-                .foregroundStyle(.secondary)
-            HStack(spacing: 6) {
-                Text(address)
-                    .font(.caption.monospaced())
-                    .textSelection(.enabled)
-                    .lineLimit(1)
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(address, forType: .string)
-                } label: {
-                    Image(systemName: "doc.on.doc")
-                        .font(.caption)
-                }
-                .buttonStyle(.borderless)
-                .help("Copy to clipboard")
-            }
-            .padding(8)
-            .background(.fill.tertiary, in: RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(network.selectedChain.isTestnet ? .orange.opacity(0.15) : .blue.opacity(0.15),
+                            in: Capsule())
+                .foregroundStyle(network.selectedChain.isTestnet ? .orange : .blue)
         }
-        .frame(maxWidth: 500)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
     }
 
-    private func fetchEthBalance(address: String) async {
+    // MARK: - Data Loading
+
+    private func loadPublicBalances(address: String) async {
         guard let balanceService else { return }
+        isLoadingPublic = true
+        defer { isLoadingPublic = false }
+
         do {
-            let balance = try await balanceService.getEthBalance(
-                chainName: network.selectedChain.rawValue,
-                address: address
+            ethBalance = try await balanceService.getEthBalance(
+                chainName: network.selectedChain.rawValue, address: address
             )
-            ethBalance = formatWei(balance)
+        } catch {}
+
+        let tokenAddresses = Token.supported.compactMap { $0.address(on: network.selectedChain) }
+        guard !tokenAddresses.isEmpty else { return }
+        do {
+            let balances = try await balanceService.getERC20Balances(
+                chainName: network.selectedChain.rawValue,
+                address: address,
+                tokenAddresses: tokenAddresses
+            )
+            for b in balances {
+                publicTokenBalances[b.tokenAddress.lowercased()] = b.amount
+            }
         } catch {}
     }
 
-    private func formatWei(_ wei: String) -> String {
-        guard let value = Decimal(string: wei) else { return "0" }
-        let eth = value / 1_000_000_000_000_000_000
-        return (eth as NSDecimalNumber).stringValue
+    /// Force-refresh private balances for all wallets (invalidates cache first).
+    private func refreshPrivateBalances() async {
+        guard let balanceService else { return }
+        let chain = network.selectedChain.rawValue
+        balanceService.invalidateAllPrivateBalances(chainName: chain)
+        let walletIDs = walletState.accounts.map(\.id)
+        await balanceService.scanAllPrivateBalances(chainName: chain, walletIDs: walletIDs)
     }
+
+    /// Shield transactions from this account on the current chain within the last hour.
+    private func pendingShieldTransactions(for account: Account) -> [Transaction] {
+        let cutoff = Date().addingTimeInterval(-3600)
+        return transactionStore.transactions.filter { tx in
+            tx.action == .shield
+                && tx.chainName == network.selectedChain.rawValue
+                && tx.fromAccountID == account.id
+                && tx.timestamp > cutoff
+        }
+    }
+}
+
+// MARK: - Preview
+
+#Preview("Account Detail") {
+    @Previewable @State var walletState = {
+        let state = WalletState()
+        state.setAccountsForPreview([
+            Account(
+                id: "preview-wallet-id",
+                derivationIndex: 0,
+                railgunAddress: "0zk1qy0v9cdm2pjash8wnfrz7xq5az62a3rjq7m4c9kfkxwcegrcc5t6rcpxgy08",
+                name: "Preview Wallet"
+            )
+        ])
+        state.unlockedKeys["preview-wallet-id"] = Account.Unlocked(
+            ethAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
+            ethPrivateKey: ""
+        )
+        state.setStep(.ready)
+        return state
+    }()
+
+    let txStore = {
+        let store = TransactionStore()
+        store.setForPreview([
+            Transaction(
+                id: "preview-tx",
+                action: .shield,
+                chainName: "sepolia",
+                txHash: "0xabc123def456789012345678901234567890abcdef",
+                timestamp: Date().addingTimeInterval(-185),
+                tokenSymbol: "ETH",
+                amount: "0.5",
+                fromAccountID: "preview-wallet-id",
+                fromAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
+                toAddress: "0zk1qy0v9cdm2pjash8wnfrz7xq5az62a3rjq7m4c9kfkxwcegrcc5t6rcpxgy08"
+            )
+        ])
+        return store
+    }()
+
+    let mockService = MockWalletService()
+
+    AccountDetailView(accountID: "preview-wallet-id")
+        .environment(walletState)
+        .environment(NetworkState())
+        .environment(txStore)
+        .environment(\.walletService, mockService)
+        .environment(\.balanceService, BalanceService(walletService: mockService))
+        .frame(width: 580, height: 700)
 }

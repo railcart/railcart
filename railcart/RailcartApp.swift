@@ -5,18 +5,37 @@
 //
 
 import SwiftUI
+
 @main
 struct RailcartApp: App {
+    @Environment(\.openWindow) private var openWindow
     @State private var bridge: NodeBridge
     @State private var walletService: LiveWalletService
     @State private var balanceService: BalanceService
-    @State private var walletState = WalletState()
-    @State private var balanceState = BalanceState()
+    @State private var walletState: WalletState
     @State private var shieldState = ShieldState()
     @State private var broadcasterState = BroadcasterState()
     @State private var networkState = NetworkState()
+    @State private var transactionStore: TransactionStore
+
+    static let isUITesting = CommandLine.arguments.contains("--ui-testing")
 
     init() {
+        if Self.isUITesting {
+            KeychainHelper.service = "app.railcart.macos.uitesting"
+            KeychainHelper.biometryDisabled = true
+            let testDefaults = UserDefaults(suiteName: "app.railcart.macos.uitesting")!
+            testDefaults.removePersistentDomain(forName: "app.railcart.macos.uitesting")
+            Account.defaults = testDefaults
+            KeychainHelper.delete(.walletID)
+            KeychainHelper.delete(.walletSalt)
+            KeychainHelper.delete(.encryptionKey)
+        }
+
+        // Create state objects after test isolation is configured
+        _walletState = State(initialValue: WalletState())
+        _transactionStore = State(initialValue: TransactionStore())
+
         let bridge = NodeBridge()
         let service = LiveWalletService(bridge: bridge)
         _bridge = State(initialValue: bridge)
@@ -37,17 +56,22 @@ struct RailcartApp: App {
                 .environment(\.balanceService, balanceService)
                 .environment(bridge)
                 .environment(walletState)
-                .environment(balanceState)
                 .environment(shieldState)
                 .environment(broadcasterState)
                 .environment(networkState)
+                .environment(transactionStore)
                 .task {
                     try? await bridge.start()
-                    try? await bridge.callRaw("initEngine")
-                    // Load chain providers from build config
-                    for (chain, url) in Config.chainProviders where !url.isEmpty {
-                        try? await walletService.loadChainProvider(chainName: chain, providerUrl: url)
+                    if Self.isUITesting {
+                        let testDir = NSTemporaryDirectory() + "railcart-uitest"
+                        try? await bridge.callRaw("initEngine", params: ["dataDir": testDir])
+                    } else {
+                        try? await bridge.callRaw("initEngine")
                     }
+                    // Load provider for the initial chain only; others load on demand
+                    try? await networkState.ensureProviderLoaded(
+                        for: networkState.selectedChain, using: walletService
+                    )
                 }
         }
         .commands {
@@ -58,6 +82,16 @@ struct RailcartApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(walletState.step != .ready)
             }
+            CommandGroup(after: .windowArrangement) {
+                Button("Debug Log") {
+                    openWindow(id: "debug-log")
+                }
+                .keyboardShortcut("l", modifiers: [.command, .option])
+            }
+        }
+
+        Window("Debug Log", id: "debug-log") {
+            LogWindowView()
         }
     }
 }

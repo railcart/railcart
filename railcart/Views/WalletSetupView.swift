@@ -59,16 +59,19 @@ struct WalletSetupView: View {
             SecureField("Password", text: $password)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 300)
+                .accessibilityIdentifier("walletSetup.password")
 
             SecureField("Confirm Password", text: $confirmPassword)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 300)
+                .accessibilityIdentifier("walletSetup.confirmPassword")
 
             Button("Create Wallet") {
                 Task { await createWallet() }
             }
             .disabled(password.isEmpty || password != confirmPassword || isWorking)
             .buttonStyle(.borderedProminent)
+            .accessibilityIdentifier("walletSetup.createButton")
 
             if password != confirmPassword && !confirmPassword.isEmpty {
                 Text("Passwords don't match")
@@ -114,6 +117,7 @@ struct WalletSetupView: View {
             }
             .buttonStyle(.borderedProminent)
             .disabled(isWorking)
+            .accessibilityIdentifier("walletSetup.savedMnemonicButton")
 
             if isWorking {
                 ProgressView("Creating wallet...")
@@ -171,6 +175,21 @@ struct WalletSetupView: View {
     // MARK: - Actions
 
     private func checkExistingWallet() {
+        if wallet.accounts.isEmpty && KeychainHelper.hasKey(.walletID) {
+            // Account list was lost (e.g. UserDefaults cleared) but Keychain still has
+            // the wallet ID. Reconstruct a placeholder account so the unlock flow can
+            // load it from the RAILGUN SDK.
+            if let walletID = KeychainHelper.load(.walletID) {
+                let recovered = Account(
+                    id: walletID,
+                    derivationIndex: 0,
+                    railgunAddress: "",
+                    name: "Wallet 1"
+                )
+                wallet.accounts = [recovered]
+            }
+        }
+
         if wallet.accounts.isEmpty {
             wallet.setStep(.enterPassword)
         } else {
@@ -201,10 +220,12 @@ struct WalletSetupView: View {
         do {
             let salt = UUID().uuidString
             let encryptionKey = try await service.deriveEncryptionKey(password: password, salt: salt)
+            let creationBlocks = await fetchCreationBlockNumbers()
             let walletInfo = try await service.createWallet(
                 encryptionKey: encryptionKey,
                 mnemonic: mnemonic,
-                derivationIndex: 0
+                derivationIndex: 0,
+                creationBlockNumbers: creationBlocks
             )
 
             try KeychainHelper.save(.walletID, value: walletInfo.id)
@@ -268,13 +289,22 @@ struct WalletSetupView: View {
         isWorking = true
         defer { isWorking = false }
 
-        for account in wallet.accounts {
+        for (index, account) in wallet.accounts.enumerated() {
             do {
                 let walletInfo = try await service.loadWallet(
                     encryptionKey: encryptionKey,
                     walletID: account.id,
                     derivationIndex: account.derivationIndex
                 )
+                // Backfill railgunAddress if it was lost (e.g. recovered from Keychain)
+                if account.railgunAddress.isEmpty {
+                    wallet.accounts[index] = Account(
+                        id: account.id,
+                        derivationIndex: account.derivationIndex,
+                        railgunAddress: walletInfo.railgunAddress,
+                        name: account.name
+                    )
+                }
                 wallet.unlockAccount(account, with: Account.Unlocked(
                     ethAddress: walletInfo.ethAddress,
                     ethPrivateKey: walletInfo.ethPrivateKey
@@ -285,5 +315,17 @@ struct WalletSetupView: View {
         }
 
         wallet.setStep(.ready)
+    }
+
+    /// Fetch current block numbers for all configured chains.
+    /// Used as creationBlockNumbers so the SDK skips scanning older blocks.
+    private func fetchCreationBlockNumbers() async -> [String: Int] {
+        var blocks: [String: Int] = [:]
+        for chainName in Config.chainProviders.keys {
+            if let blockNumber = try? await service.getBlockNumber(chainName: chainName) {
+                blocks[chainName] = blockNumber
+            }
+        }
+        return blocks
     }
 }

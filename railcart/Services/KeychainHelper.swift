@@ -10,7 +10,7 @@ import LocalAuthentication
 import Security
 
 enum KeychainHelper {
-    private static let service = "app.railcart.ios"
+    static var service = "app.railcart.macos"
 
     enum Key: String {
         case walletID = "wallet.id"
@@ -86,7 +86,10 @@ enum KeychainHelper {
         }
     }
 
+    static var biometryDisabled = false
+
     static var canUseBiometry: Bool {
+        if biometryDisabled { return false }
         let context = LAContext()
         return context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: nil)
     }

@@ -16,7 +16,7 @@ let engineInitialized = false;
 
 function getDataDir() {
   const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
-  return path.join(home, ".railgun-wallet");
+  return path.join(home, ".railcart");
 }
 
 function createArtifactStore(baseDir) {
@@ -58,7 +58,7 @@ export function registerEngineInitMethods() {
    * Initialize the RAILGUN engine.
    *
    * params: {
-   *   dataDir?: string  (defaults to ~/.railgun-wallet)
+   *   dataDir?: string  (defaults to ~/.railcart)
    * }
    */
   registerMethod("initEngine", async (params) => {
@@ -91,6 +91,17 @@ export function registerEngineInitMethods() {
 
     // Register scan callbacks after engine is initialized
     setOnUTXOMerkletreeScanCallback(({ scanStatus, chain, progress }) => {
+      if (scanStatus === "Started") {
+        process.stderr.write(`[sync] UTXO merkletree scan started (chain ${chain.id})\n`);
+      } else if (scanStatus === "Complete") {
+        process.stderr.write(`[sync] UTXO merkletree scan complete (chain ${chain.id})\n`);
+      } else if (scanStatus === "Updated" && progress !== undefined) {
+        // Log every 10% to avoid flooding
+        const pct = Math.round(progress * 100);
+        if (pct % 10 === 0) {
+          process.stderr.write(`[sync] UTXO scan progress: ${pct}% (chain ${chain.id})\n`);
+        }
+      }
       sendEvent("scanProgress", {
         type: "utxo",
         scanStatus,
@@ -100,6 +111,11 @@ export function registerEngineInitMethods() {
     });
 
     setOnTXIDMerkletreeScanCallback(({ scanStatus, chain, progress }) => {
+      if (scanStatus === "Started") {
+        process.stderr.write(`[sync] TXID merkletree scan started (chain ${chain.id})\n`);
+      } else if (scanStatus === "Complete") {
+        process.stderr.write(`[sync] TXID merkletree scan complete (chain ${chain.id})\n`);
+      }
       sendEvent("scanProgress", {
         type: "txid",
         scanStatus,
@@ -109,6 +125,7 @@ export function registerEngineInitMethods() {
     });
 
     engineInitialized = true;
+    process.stderr.write(`[sync] Engine initialized, data dir: ${dataDir}\n`);
     sendEvent("engineInitialized", {});
     return { initialized: true, dataDir };
   });
@@ -145,6 +162,7 @@ export function registerEngineInitMethods() {
     };
 
     await loadProvider(providerConfig, networkName);
+    process.stderr.write(`[sync] Loaded provider for ${chainName} (${networkName})\n`);
     return { chainName, loaded: true };
   });
 }

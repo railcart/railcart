@@ -1,5 +1,5 @@
 import { registerMethod, sendEvent } from "./bridge.js";
-import { chainForName } from "./chains.js";
+import { chainForName, CHAINS } from "./chains.js";
 import { isEngineInitialized } from "./engine-init.js";
 import {
   createRailgunWallet,
@@ -122,10 +122,20 @@ export function registerWalletMethods() {
       throw new Error("encryptionKey and mnemonic are required");
     }
     const index = derivationIndex ?? 0;
+    // Convert our chainName keys (e.g. "ethereum") to SDK NetworkName keys (e.g. "Ethereum")
+    const sdkBlockNumbers = {};
+    if (creationBlockNumbers) {
+      for (const [name, block] of Object.entries(creationBlockNumbers)) {
+        const entry = CHAINS[name];
+        if (entry) {
+          sdkBlockNumbers[entry.networkName] = block;
+        }
+      }
+    }
     const result = await createRailgunWallet(
       encryptionKey,
       mnemonic,
-      creationBlockNumbers || {},
+      sdkBlockNumbers,
       index,
     );
     const ethKey = deriveEthKey(mnemonic, index);
@@ -231,21 +241,33 @@ export function registerWalletMethods() {
    */
   registerMethod("scanBalances", async (params) => {
     requireEngine();
-    const { chainName, railgunWalletID } = params;
+    const { chainName, railgunWalletID, railgunWalletIDs } = params;
     const { chain } = chainForName(chainName);
-    const walletFilter = railgunWalletID ? [railgunWalletID] : undefined;
+    // Accept either a single ID or an array of IDs; undefined scans all loaded wallets
+    const walletFilter = railgunWalletIDs?.length
+      ? railgunWalletIDs
+      : railgunWalletID
+        ? [railgunWalletID]
+        : undefined;
+
+    process.stderr.write(`[sync] Starting full rescan for ${chainName} (chain ${chain.id})\n`);
+    const startTime = Date.now();
 
     try {
       await rescanFullUTXOMerkletreesAndWallets(chain, walletFilter);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(`[sync] Full rescan complete for ${chainName} in ${elapsed}s\n`);
     } catch (err) {
-      // Full rescan can fail due to POI state issues.
-      // Fall back to a lighter balance refresh.
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(`[sync] Full rescan failed for ${chainName} after ${elapsed}s: ${err.message}\n`);
+      process.stderr.write(`[sync] Falling back to refreshBalances for ${chainName}\n`);
       try {
         await refreshBalances(chain, walletFilter);
+        const elapsed2 = ((Date.now() - startTime) / 1000).toFixed(1);
+        process.stderr.write(`[sync] refreshBalances complete for ${chainName} in ${elapsed2}s\n`);
       } catch (refreshErr) {
-        // refreshBalances may also trigger background POI refresh that fails.
-        // The actual balance scan may still have succeeded.
-        process.stderr.write(`[scanBalances] refreshBalances fallback error: ${refreshErr.message}\n`);
+        const elapsed2 = ((Date.now() - startTime) / 1000).toFixed(1);
+        process.stderr.write(`[sync] refreshBalances fallback failed for ${chainName} after ${elapsed2}s: ${refreshErr.message}\n`);
       }
     }
     return { scanned: true, chainName };
@@ -277,6 +299,51 @@ export function registerWalletMethods() {
     const provider = getFallbackProviderForNetwork(networkName);
     const balance = await provider.getBalance(address);
     return { balance: balance.toString(), address };
+  });
+
+  /**
+   * Get the current block number for a chain.
+   *
+   * params: { chainName: string }
+   */
+  registerMethod("getBlockNumber", async (params) => {
+    requireEngine();
+    const { chainName } = params;
+    const { networkName } = chainForName(chainName);
+    const provider = getFallbackProviderForNetwork(networkName);
+    const blockNumber = await provider.getBlockNumber();
+    return { blockNumber, chainName };
+  });
+
+  /**
+   * Get ERC-20 token balances for an address.
+   *
+   * params: { chainName: string, address: string, tokenAddresses: string[] }
+   */
+  registerMethod("getERC20Balances", async (params) => {
+    requireEngine();
+    const { chainName, address, tokenAddresses } = params;
+    if (!address || !tokenAddresses?.length) {
+      throw new Error("address and tokenAddresses are required");
+    }
+    const { networkName } = chainForName(chainName);
+    const provider = getFallbackProviderForNetwork(networkName);
+    const balanceOfSelector = "0x70a08231";
+    const balances = await Promise.all(
+      tokenAddresses.map(async (tokenAddress) => {
+        try {
+          const paddedAddress = "0x" + address.slice(2).padStart(64, "0");
+          const result = await provider.call({
+            to: tokenAddress,
+            data: balanceOfSelector + paddedAddress.slice(2),
+          });
+          return { tokenAddress, amount: BigInt(result).toString() };
+        } catch {
+          return { tokenAddress, amount: "0" };
+        }
+      })
+    );
+    return { balances };
   });
 
   /**

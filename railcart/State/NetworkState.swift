@@ -36,4 +36,16 @@ final class NetworkState {
         .ethereum
         #endif
     }()
+
+    /// Chains whose RPC provider has been loaded into the RAILGUN engine.
+    private(set) var loadedChains: Set<Chain> = []
+
+    /// Load the RPC provider for a chain if it hasn't been loaded yet.
+    /// Returns immediately if already loaded.
+    func ensureProviderLoaded(for chain: Chain, using service: any WalletServiceProtocol) async throws {
+        guard !loadedChains.contains(chain) else { return }
+        guard let url = Config.chainProviders[chain.rawValue], !url.isEmpty else { return }
+        try await service.loadChainProvider(chainName: chain.rawValue, providerUrl: url)
+        loadedChains.insert(chain)
+    }
 }

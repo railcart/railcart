@@ -19,11 +19,19 @@
 			remoteGlobalIDString = D078479F2F71C5D40008E08D;
 			remoteInfo = railcart;
 		};
+		D0UITEST012F71C5D50008E08D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = D07847982F71C5D40008E08D /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = D078479F2F71C5D40008E08D;
+			remoteInfo = railcart;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		D07847A02F71C5D40008E08D /* railcart.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = railcart.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		D07847B22F71C5D50008E08D /* railcartTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = railcartTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D0UITEST002F71C5D50008E08D /* railcartUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = railcartUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -35,6 +43,11 @@
 		D07847B52F71C5D50008E08D /* railcartTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = railcartTests;
+			sourceTree = "<group>";
+		};
+		D0UITEST032F71C5D50008E08D /* railcartUITests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = railcartUITests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -56,6 +69,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0UITEST042F71C5D50008E08D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -64,6 +84,7 @@
 			children = (
 				D07847A22F71C5D40008E08D /* railcart */,
 				D07847B52F71C5D50008E08D /* railcartTests */,
+				D0UITEST032F71C5D50008E08D /* railcartUITests */,
 				D0A63CAD2F74A8DE0032498D /* Frameworks */,
 				D07847A12F71C5D40008E08D /* Products */,
 			);
@@ -74,6 +95,7 @@
 			children = (
 				D07847A02F71C5D40008E08D /* railcart.app */,
 				D07847B22F71C5D50008E08D /* railcartTests.xctest */,
+				D0UITEST002F71C5D50008E08D /* railcartUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -135,6 +157,29 @@
 			productReference = D07847B22F71C5D50008E08D /* railcartTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		D0UITEST052F71C5D50008E08D /* railcartUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D0UITEST0C2F71C5D50008E08D /* Build configuration list for PBXNativeTarget "railcartUITests" */;
+			buildPhases = (
+				D0UITEST062F71C5D50008E08D /* Sources */,
+				D0UITEST042F71C5D50008E08D /* Frameworks */,
+				D0UITEST072F71C5D50008E08D /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D0UITEST022F71C5D50008E08D /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				D0UITEST032F71C5D50008E08D /* railcartUITests */,
+			);
+			name = railcartUITests;
+			packageProductDependencies = (
+			);
+			productName = railcartUITests;
+			productReference = D0UITEST002F71C5D50008E08D /* railcartUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -149,6 +194,10 @@
 						CreatedOnToolsVersion = 26.2;
 					};
 					D07847B12F71C5D50008E08D = {
+						CreatedOnToolsVersion = 26.2;
+						TestTargetID = D078479F2F71C5D40008E08D;
+					};
+					D0UITEST052F71C5D50008E08D = {
 						CreatedOnToolsVersion = 26.2;
 						TestTargetID = D078479F2F71C5D40008E08D;
 					};
@@ -173,6 +222,7 @@
 			targets = (
 				D078479F2F71C5D40008E08D /* railcart */,
 				D07847B12F71C5D50008E08D /* railcartTests */,
+				D0UITEST052F71C5D50008E08D /* railcartUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -186,6 +236,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		D07847B02F71C5D50008E08D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D0UITEST072F71C5D50008E08D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -213,7 +270,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\n\nRESOURCES_DIR=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nNODE_SRC=\"${SRCROOT}/vendor/node/bin/node\"\nNODEJS_PROJECT=\"${SRCROOT}/nodejs-project\"\n\n# Verify setup has been run\nif [ ! -f \"$NODE_SRC\" ]; then\n    echo \"error: Node.js binary not found. Run: scripts/setup-node.sh\"\n    exit 1\nfi\n\nif [ ! -d \"$NODEJS_PROJECT/node_modules\" ]; then\n    echo \"error: node_modules not found. Run: cd nodejs-project && npm install\"\n    exit 1\nfi\n\n# Copy node binary\nmkdir -p \"$RESOURCES_DIR\"\ncp \"$NODE_SRC\" \"$RESOURCES_DIR/node\"\nchmod +x \"$RESOURCES_DIR/node\"\n\n# Copy nodejs-project (src + node_modules + package.json)\nrsync -a --delete \\\n    --exclude='.git' \\\n    --exclude='.gitignore' \\\n    --exclude='*.test.js' \\\n    \"$NODEJS_PROJECT/\" \"$RESOURCES_DIR/nodejs-project/\"\n";
+			shellScript = "set -euo pipefail\n\nRESOURCES_DIR=\"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Resources\"\nNODE_SRC=\"${SRCROOT}/vendor/node/bin/node\"\nNODEJS_PROJECT=\"${SRCROOT}/nodejs-project\"\n\n# Verify setup has been run\nif [ ! -f \"$NODE_SRC\" ]; then\n    echo \"error: Node.js binary not found. Run: scripts/setup-node.sh\"\n    exit 1\nfi\n\nif [ ! -d \"$NODEJS_PROJECT/node_modules\" ]; then\n    echo \"error: node_modules not found. Run: cd nodejs-project && npm install\"\n    exit 1\nfi\n\n# Copy node binary\nmkdir -p \"$RESOURCES_DIR\"\ncp \"$NODE_SRC\" \"$RESOURCES_DIR/node\"\nchmod +x \"$RESOURCES_DIR/node\"\n\n# Copy nodejs-project (src + node_modules + package.json)\n# Exclude react-native and its transitive deps (pulled in by @graphql-mesh/cross-helpers\n# which uses native fs in Node.js, not react-native-fs)\nrsync -a --delete \\\n    --exclude='.git' \\\n    --exclude='.gitignore' \\\n    --exclude='*.test.js' \\\n    --exclude='node_modules/react-native' \\\n    --exclude='node_modules/@react-native' \\\n    --exclude='node_modules/react-devtools-core' \\\n    --exclude='node_modules/react-native-fs' \\\n    --exclude='node_modules/@babel' \\\n    --exclude='node_modules/@types' \\\n    --exclude='node_modules/fb-dotslash' \\\n    --exclude='node_modules/jest-*' \\\n    --exclude='node_modules/@jest' \\\n    --exclude='node_modules/babel-*' \\\n    \"$NODEJS_PROJECT/\" \"$RESOURCES_DIR/nodejs-project/\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -232,6 +289,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		D0UITEST062F71C5D50008E08D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -239,6 +303,11 @@
 			isa = PBXTargetDependency;
 			target = D078479F2F71C5D40008E08D /* railcart */;
 			targetProxy = D07847B32F71C5D50008E08D /* PBXContainerItemProxy */;
+		};
+		D0UITEST022F71C5D50008E08D /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = D078479F2F71C5D40008E08D /* railcart */;
+			targetProxy = D0UITEST012F71C5D50008E08D /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -378,14 +447,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your RAILGUN wallet with Touch ID";
+
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -411,14 +480,14 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSFaceIDUsageDescription = "Unlock your RAILGUN wallet with Touch ID";
+
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.ios;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macos;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -439,7 +508,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.iosTests;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macosTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -460,7 +529,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.iosTests;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macosTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -468,6 +537,44 @@
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/railcart.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/railcart";
+			};
+			name = Release;
+		};
+		D0UITEST082F71C5D50008E08D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macos.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = railcart;
+			};
+			name = Debug;
+		};
+		D0UITEST092F71C5D50008E08D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = app.railcart.macos.uitests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_TARGET_NAME = railcart;
 			};
 			name = Release;
 		};
@@ -497,6 +604,15 @@
 			buildConfigurations = (
 				D07847CA2F71C5D50008E08D /* Debug */,
 				D07847CB2F71C5D50008E08D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		D0UITEST0C2F71C5D50008E08D /* Build configuration list for PBXNativeTarget "railcartUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				D0UITEST082F71C5D50008E08D /* Debug */,
+				D0UITEST092F71C5D50008E08D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

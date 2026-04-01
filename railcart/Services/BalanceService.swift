@@ -3,7 +3,8 @@
 //  railcart
 //
 //  Caching layer for public and private balances.
-//  Cache entries expire after 5 minutes and can be invalidated manually.
+//  Private balances are scanned once for all wallets and cached for 30 minutes.
+//  Public balances are cached per-address for 5 minutes.
 //
 
 import Foundation
@@ -14,8 +15,8 @@ private struct CacheEntry<T> {
     let value: T
     let timestamp: Date
 
-    var isExpired: Bool {
-        Date().timeIntervalSince(timestamp) > 300  // 5 minutes
+    func isExpired(ttl: TimeInterval) -> Bool {
+        Date().timeIntervalSince(timestamp) > ttl
     }
 }
 
@@ -24,11 +25,22 @@ private struct CacheEntry<T> {
 final class BalanceService {
     private let walletService: any WalletServiceProtocol
 
+    private static let publicTTL: TimeInterval = 300      // 5 minutes
+    private static let privateTTL: TimeInterval = 1800     // 30 minutes
+
     // Cache keyed by "chain:address" for public balances
     private var ethBalanceCache: [String: CacheEntry<String>] = [:]
+    private var erc20BalanceCache: [String: CacheEntry<[TokenBalance]>] = [:]
 
     // Cache keyed by "chain:walletID" for private balances
     private var privateBalanceCache: [String: CacheEntry<[TokenBalance]>] = [:]
+
+    // MARK: - Observable scan state
+
+    /// Whether a private balance scan is currently running.
+    private(set) var isScanning = false
+    private(set) var scanStep: String?
+    private(set) var scanProgress: Double = 0
 
     init(walletService: any WalletServiceProtocol) {
         self.walletService = walletService
@@ -36,11 +48,9 @@ final class BalanceService {
 
     // MARK: - Public ETH Balance
 
-    /// Get public ETH balance for an address on a chain.
-    /// Returns cached value if fresh, otherwise fetches.
     func getEthBalance(chainName: String, address: String) async throws -> String {
         let key = "\(chainName):\(address)"
-        if let cached = ethBalanceCache[key], !cached.isExpired {
+        if let cached = ethBalanceCache[key], !cached.isExpired(ttl: Self.publicTTL) {
             return cached.value
         }
         let balance = try await walletService.getEthBalance(chainName: chainName, address: address)
@@ -48,41 +58,98 @@ final class BalanceService {
         return balance
     }
 
-    // MARK: - Private RAILGUN Balances
+    // MARK: - Public ERC-20 Balances
 
-    /// Get private token balances for a wallet on a chain.
-    /// Returns cached value if fresh, otherwise scans and fetches.
-    func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {
-        let key = "\(chainName):\(walletID)"
-        if let cached = privateBalanceCache[key], !cached.isExpired {
+    func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance] {
+        let key = "\(chainName):\(address)"
+        if let cached = erc20BalanceCache[key], !cached.isExpired(ttl: Self.publicTTL) {
             return cached.value
         }
-        let balances = try await walletService.scanAndGetBalances(chainName: chainName, walletID: walletID)
-        privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+        let balances = try await walletService.getERC20Balances(
+            chainName: chainName, address: address, tokenAddresses: tokenAddresses
+        )
+        erc20BalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
         return balances
     }
 
+    func invalidateERC20Balances(chainName: String, address: String) {
+        erc20BalanceCache.removeValue(forKey: "\(chainName):\(address)")
+    }
+
+    // MARK: - Private RAILGUN Balances
+
+    /// Return cached private balances if fresh, without triggering a scan.
+    func cachedPrivateBalances(chainName: String, walletID: String) -> [TokenBalance]? {
+        let key = "\(chainName):\(walletID)"
+        guard let cached = privateBalanceCache[key], !cached.isExpired(ttl: Self.privateTTL) else { return nil }
+        return cached.value
+    }
+
+    /// Scan the merkletree for all wallets on a chain and cache results.
+    /// This is the single entry point for private balance scanning.
+    /// Views should observe `isScanning` / `scanProgress` for UI state.
+    func scanAllPrivateBalances(chainName: String, walletIDs: [String]) async {
+        guard !isScanning else { return }
+        isScanning = true
+        scanStep = "Scanning merkletree..."
+        scanProgress = 0
+        scanGeneration += 1
+
+        AppLogger.shared.log("sync", "Starting private balance sync for \(chainName) (\(walletIDs.count) wallets)")
+        do {
+            try await walletService.scanBalances(chainName: chainName, walletIDs: walletIDs)
+            for walletID in walletIDs {
+                let balances = try await walletService.getPrivateBalances(chainName: chainName, walletID: walletID)
+                let key = "\(chainName):\(walletID)"
+                privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+            }
+            AppLogger.shared.log("sync", "Private balance sync complete for \(chainName)")
+        } catch {
+            AppLogger.shared.log("error", "Private balance sync failed for \(chainName): \(error.localizedDescription)")
+        }
+
+        isScanning = false
+        scanStep = nil
+    }
+
+    /// Whether all wallets on a chain have fresh cached private balances.
+    func hasAllPrivateBalances(chainName: String, walletIDs: [String]) -> Bool {
+        walletIDs.allSatisfy { cachedPrivateBalances(chainName: chainName, walletID: $0) != nil }
+    }
+
+    /// Update scan progress from external events (e.g. NodeBridge scanProgress events).
+    func updateScanProgress(step: String?, progress: Double) {
+        guard isScanning else { return }
+        if let step { scanStep = step }
+        if progress > scanProgress { scanProgress = progress }
+    }
+
+    /// Incremented each time a new scan starts; listeners use this to reset their state.
+    private(set) var scanGeneration = 0
+
     // MARK: - Cache Invalidation
 
-    /// Invalidate public balance cache for a specific address on a chain.
     func invalidateEthBalance(chainName: String, address: String) {
         ethBalanceCache.removeValue(forKey: "\(chainName):\(address)")
     }
 
-    /// Invalidate private balance cache for a wallet on a chain.
     func invalidatePrivateBalances(chainName: String, walletID: String) {
         privateBalanceCache.removeValue(forKey: "\(chainName):\(walletID)")
     }
 
-    /// Invalidate all cached balances for a chain.
-    func invalidateChain(_ chainName: String) {
-        ethBalanceCache = ethBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
+    func invalidateAllPrivateBalances(chainName: String) {
         privateBalanceCache = privateBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
     }
 
-    /// Invalidate all cached balances.
+    func invalidateChain(_ chainName: String) {
+        ethBalanceCache = ethBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
+        erc20BalanceCache = erc20BalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
+        privateBalanceCache = privateBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
+    }
+
     func invalidateAll() {
         ethBalanceCache.removeAll()
+        erc20BalanceCache.removeAll()
         privateBalanceCache.removeAll()
     }
 }

@@ -23,7 +23,7 @@ final class WalletState {
 
     /// Persisted account metadata (names, IDs, indices, railgun addresses).
     var accounts: [Account] = Account.loadAll() {
-        didSet { Account.saveAll(accounts) }
+        didSet { if !isPreview { Account.saveAll(accounts) } }
     }
 
     /// In-memory unlocked keys, keyed by account ID. Cleared on lock.
@@ -35,6 +35,7 @@ final class WalletState {
     var showImportSheet = false
 
     private var lockTimer: Timer?
+    private var isPreview = false
 
     /// The next derivation index to use when adding a new account.
     var nextDerivationIndex: Int {
@@ -66,6 +67,12 @@ final class WalletState {
 
     func account(byID id: String) -> Account? {
         accounts.first { $0.id == id }
+    }
+
+    /// Set accounts without triggering UserDefaults persistence. For previews only.
+    func setAccountsForPreview(_ newAccounts: [Account]) {
+        isPreview = true
+        accounts = newAccounts
     }
 
     private func startLockTimer() {

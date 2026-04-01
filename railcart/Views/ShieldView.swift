@@ -13,6 +13,7 @@ struct ShieldView: View {
     @Environment(ShieldState.self) private var shieldState
     @Environment(NetworkState.self) private var network
     @Environment(WalletState.self) private var wallet
+    @Environment(TransactionStore.self) private var transactionStore
 
     @State private var shieldAmount = ""
     @State private var isWorking = false
@@ -218,6 +219,18 @@ struct ShieldView: View {
 
             shieldState.txHash = txHash
             shieldState.statusMessage = "Shield transaction sent"
+            transactionStore.record(Transaction(
+                id: UUID().uuidString,
+                action: .shield,
+                chainName: network.selectedChain.rawValue,
+                txHash: txHash,
+                timestamp: Date(),
+                tokenSymbol: "ETH",
+                amount: shieldAmount,
+                fromAccountID: firstAccount?.id ?? "",
+                fromAddress: ethAddress,
+                toAddress: railgunAddress
+            ))
             // Invalidate both public (ETH spent on gas) and private (new shielded balance)
             let chain = network.selectedChain.rawValue
             balanceService?.invalidateEthBalance(chainName: chain, address: ethAddress)
@@ -267,6 +280,18 @@ struct ShieldView: View {
             shieldState.unshieldTxHash = txHash
             shieldState.statusMessage = nil
             shieldState.proofProgress = nil
+            transactionStore.record(Transaction(
+                id: UUID().uuidString,
+                action: .unshield,
+                chainName: network.selectedChain.rawValue,
+                txHash: txHash,
+                timestamp: Date(),
+                tokenSymbol: "ETH",
+                amount: unshieldAmount,
+                fromAccountID: firstAccount?.id ?? "",
+                fromAddress: firstAccount?.railgunAddress ?? "",
+                toAddress: unshieldToAddress
+            ))
             // Invalidate both public (ETH received) and private (spent shielded balance)
             let chain = network.selectedChain.rawValue
             balanceService?.invalidateEthBalance(chainName: chain, address: unshieldToAddress)
