@@ -56,6 +56,7 @@ struct MockWalletService: WalletServiceProtocol {
     func unshieldBaseToken(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
 
     func scanBalances(chainName: String, walletIDs: [String]) async throws {}
+    func fullRescan(chainName: String, walletIDs: [String]) async throws {}
 
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {
         try await scanAndGetBalances(chainName: chainName, walletID: walletID)

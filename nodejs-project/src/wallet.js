@@ -53,6 +53,18 @@ function serializeTransaction(tx) {
 
 export { serializeTransaction };
 
+function parseScanParams(params) {
+  requireEngine();
+  const { chainName, railgunWalletID, railgunWalletIDs } = params;
+  const { chain } = chainForName(chainName);
+  const walletFilter = railgunWalletIDs?.length
+    ? railgunWalletIDs
+    : railgunWalletID
+      ? [railgunWalletID]
+      : undefined;
+  return { chainName, chain, walletFilter };
+}
+
 export function registerWalletMethods() {
   /**
    * Validate a BIP-39 mnemonic phrase.
@@ -234,21 +246,36 @@ export function registerWalletMethods() {
   });
 
   /**
-   * Trigger a full merkletree rescan for a chain.
-   * This finds shielded UTXOs and updates wallet balances.
+   * Incremental balance refresh — picks up where the last scan left off.
+   * Use fullRescan for first-time or recovery scenarios.
    *
-   * params: { chainName: string, railgunWalletID?: string }
+   * params: { chainName: string, railgunWalletID?: string, railgunWalletIDs?: string[] }
    */
   registerMethod("scanBalances", async (params) => {
-    requireEngine();
-    const { chainName, railgunWalletID, railgunWalletIDs } = params;
-    const { chain } = chainForName(chainName);
-    // Accept either a single ID or an array of IDs; undefined scans all loaded wallets
-    const walletFilter = railgunWalletIDs?.length
-      ? railgunWalletIDs
-      : railgunWalletID
-        ? [railgunWalletID]
-        : undefined;
+    const { chainName, chain, walletFilter } = parseScanParams(params);
+
+    process.stderr.write(`[sync] Starting incremental refresh for ${chainName} (chain ${chain.id})\n`);
+    const startTime = Date.now();
+
+    try {
+      await refreshBalances(chain, walletFilter);
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(`[sync] Incremental refresh complete for ${chainName} in ${elapsed}s\n`);
+    } catch (err) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(`[sync] Incremental refresh failed for ${chainName} after ${elapsed}s: ${err.message}\n`);
+    }
+    return { scanned: true, chainName };
+  });
+
+  /**
+   * Full merkletree rescan — re-processes all local data from scratch.
+   * Slow but thorough. Use for first-time setup or imported wallets.
+   *
+   * params: { chainName: string, railgunWalletID?: string, railgunWalletIDs?: string[] }
+   */
+  registerMethod("fullRescan", async (params) => {
+    const { chainName, chain, walletFilter } = parseScanParams(params);
 
     process.stderr.write(`[sync] Starting full rescan for ${chainName} (chain ${chain.id})\n`);
     const startTime = Date.now();
@@ -260,6 +287,7 @@ export function registerWalletMethods() {
     } catch (err) {
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       process.stderr.write(`[sync] Full rescan failed for ${chainName} after ${elapsed}s: ${err.message}\n`);
+      // Fall back to incremental refresh
       process.stderr.write(`[sync] Falling back to refreshBalances for ${chainName}\n`);
       try {
         await refreshBalances(chain, walletFilter);

@@ -41,6 +41,19 @@ final class BalanceService {
     private(set) var isScanning = false
     private(set) var scanStep: String?
     private(set) var scanProgress: Double = 0
+    /// The chain currently being scanned for UI display purposes (nil if idle).
+    private(set) var scanningChain: String?
+
+    /// In-flight scan tasks keyed by chain name. Callers can await an existing scan
+    /// instead of starting a duplicate.
+    private var inFlightScans: [String: Task<Void, Never>] = [:]
+
+    /// The currently executing scan task (only one scan runs at a time to avoid
+    /// overloading the node process with concurrent merkletree rescans).
+    private var activeScanTask: Task<Void, Never>?
+
+    /// Last known scan progress per chain, so switching back shows the most recent value.
+    private var lastProgress: [String: (step: String?, progress: Double)] = [:]
 
     init(walletService: any WalletServiceProtocol) {
         self.walletService = walletService
@@ -86,30 +99,61 @@ final class BalanceService {
     }
 
     /// Scan the merkletree for all wallets on a chain and cache results.
-    /// This is the single entry point for private balance scanning.
-    /// Views should observe `isScanning` / `scanProgress` for UI state.
+    /// If a scan is already in flight for this chain, awaits that scan instead.
+    /// Scans run to completion even if the user switches chains — node-side work
+    /// can't be cancelled, so we always cache the results.
+    /// Scan the merkletree for all wallets on a chain and cache results.
+    /// If a scan is already in flight for this chain, awaits that scan instead.
+    /// Scans run serially — concurrent merkletree rescans overload the node process.
+    /// Automatically sets up scan UI state; callers don't need to call beginScanUI.
     func scanAllPrivateBalances(chainName: String, walletIDs: [String]) async {
-        guard !isScanning else { return }
-        isScanning = true
-        scanStep = "Scanning merkletree..."
-        scanProgress = 0
-        scanGeneration += 1
-
-        AppLogger.shared.log("sync", "Starting private balance sync for \(chainName) (\(walletIDs.count) wallets)")
-        do {
-            try await walletService.scanBalances(chainName: chainName, walletIDs: walletIDs)
-            for walletID in walletIDs {
-                let balances = try await walletService.getPrivateBalances(chainName: chainName, walletID: walletID)
-                let key = "\(chainName):\(walletID)"
-                privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
-            }
-            AppLogger.shared.log("sync", "Private balance sync complete for \(chainName)")
-        } catch {
-            AppLogger.shared.log("error", "Private balance sync failed for \(chainName): \(error.localizedDescription)")
+        // If a scan is already in flight for this chain, wait for it
+        if let existing = inFlightScans[chainName] {
+            AppLogger.shared.log("sync", "Joining in-flight scan for \(chainName)")
+            await existing.value
+            return
         }
 
-        isScanning = false
-        scanStep = nil
+        // Wait for any other chain's scan to finish first
+        if let active = activeScanTask {
+            AppLogger.shared.log("sync", "Waiting for active scan to finish before scanning \(chainName)")
+            await active.value
+        }
+
+        beginScanUI(chainName: chainName)
+
+        let task = Task {
+            AppLogger.shared.log("sync", "Starting private balance sync for \(chainName) (\(walletIDs.count) wallets)")
+            do {
+                try await walletService.scanBalances(chainName: chainName, walletIDs: walletIDs)
+                for walletID in walletIDs {
+                    let balances = try await walletService.getPrivateBalances(chainName: chainName, walletID: walletID)
+                    let key = "\(chainName):\(walletID)"
+                    privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+                }
+                AppLogger.shared.log("sync", "Private balance sync complete for \(chainName)")
+            } catch {
+                AppLogger.shared.log("error", "Private balance sync failed for \(chainName): \(error.localizedDescription)")
+            }
+
+            inFlightScans.removeValue(forKey: chainName)
+            lastProgress.removeValue(forKey: chainName)
+            if inFlightScans[chainName] == nil {
+                // This was the last scan to finish; clear the active slot
+                activeScanTask = nil
+            }
+
+            // Only clear scan UI state if this chain is still the displayed one
+            if scanningChain == chainName {
+                isScanning = false
+                scanStep = nil
+                scanProgress = 0
+                scanningChain = nil
+            }
+        }
+        inFlightScans[chainName] = task
+        activeScanTask = task
+        await task.value
     }
 
     /// Whether all wallets on a chain have fresh cached private balances.
@@ -117,15 +161,45 @@ final class BalanceService {
         walletIDs.allSatisfy { cachedPrivateBalances(chainName: chainName, walletID: $0) != nil }
     }
 
-    /// Update scan progress from external events (e.g. NodeBridge scanProgress events).
+    /// Update scan progress from external events.
     func updateScanProgress(step: String?, progress: Double) {
-        guard isScanning else { return }
+        guard isScanning, let scanningChain else { return }
+        let changed = (step != nil && step != scanStep) || progress != scanProgress
+        guard changed else { return }
         if let step { scanStep = step }
-        if progress > scanProgress { scanProgress = progress }
+        scanProgress = progress
+        lastProgress[scanningChain] = (step: scanStep, progress: scanProgress)
     }
 
     /// Incremented each time a new scan starts; listeners use this to reset their state.
     private(set) var scanGeneration = 0
+
+    /// Reset scan UI state when switching chains.
+    /// Does NOT cancel in-flight node scans — they run to completion and cache results.
+    func resetScanState() {
+        if let scanningChain {
+            AppLogger.shared.log("sync", "Switching away from \(scanningChain)")
+        }
+        isScanning = false
+        scanStep = nil
+        scanProgress = 0
+        scanningChain = nil
+    }
+
+    /// Set the chain that scan UI should display for, and show scanning state.
+    /// Restores last known progress if this chain has an in-flight scan.
+    func beginScanUI(chainName: String) {
+        scanningChain = chainName
+        isScanning = true
+        if let last = lastProgress[chainName] {
+            scanStep = last.step
+            scanProgress = last.progress
+        } else {
+            scanStep = "Scanning merkletree..."
+            scanProgress = 0
+        }
+        scanGeneration += 1
+    }
 
     // MARK: - Cache Invalidation
 

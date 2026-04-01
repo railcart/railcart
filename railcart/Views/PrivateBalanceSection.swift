@@ -11,7 +11,6 @@ struct PrivateBalanceSection: View {
     let railgunAddress: String
     let tokenBalances: [TokenBalance]
     let chain: Chain
-    let isLoading: Bool
     let isScanning: Bool
     let scanStep: String?
     let scanProgress: Double
@@ -25,7 +24,7 @@ struct PrivateBalanceSection: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
                 Spacer()
-                if isLoading || isScanning {
+                if isScanning {
                     ProgressView()
                         .controlSize(.small)
                 }
@@ -36,7 +35,7 @@ struct PrivateBalanceSection: View {
                         .font(.caption)
                 }
                 .buttonStyle(.borderless)
-                .disabled(isLoading)
+                .disabled(isScanning)
             }
 
             AddressPill(address: railgunAddress)
@@ -67,7 +66,7 @@ struct PrivateBalanceSection: View {
 
             // Token balance grid
             LazyVGrid(columns: tokenGridColumns, spacing: 10) {
-                let hasSynced = !tokenBalances.isEmpty || (!isLoading && !isScanning)
+                let hasSynced = !tokenBalances.isEmpty || !isScanning
                 ForEach(Token.supported) { token in
                     let address = token.address(on: chain)
                     let balance = address.flatMap { addr in

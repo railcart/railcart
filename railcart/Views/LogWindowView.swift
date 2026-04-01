@@ -42,6 +42,16 @@ struct LogWindowView: View {
 
             Spacer()
 
+            if let logFileURL = logger.logFileURL {
+                Button {
+                    NSWorkspace.shared.open(logFileURL)
+                } label: {
+                    Image(systemName: "doc.text")
+                }
+                .buttonStyle(.borderless)
+                .help("Open log file")
+            }
+
             Text("\(filteredEntries.count) entries")
                 .font(.caption)
                 .foregroundStyle(.tertiary)
@@ -87,9 +97,7 @@ struct LogWindowView: View {
     }
 
     private func timeString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
-        return f.string(from: date)
+        AppLogger.dateFormatter.string(from: date)
     }
 
     private func categoryColor(_ category: String) -> Color {

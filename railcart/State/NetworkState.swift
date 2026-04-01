@@ -21,6 +21,13 @@ enum Chain: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    var chainId: Int {
+        switch self {
+        case .ethereum: 1
+        case .sepolia: 11155111
+        }
+    }
+
     var isTestnet: Bool {
         self == .sepolia
     }

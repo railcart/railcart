@@ -40,6 +40,7 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func shieldBaseToken(chainName: String, railgunAddress: String, amount: String, privateKey: String) async throws -> String { fatalError() }
     func unshieldBaseToken(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func scanBalances(chainName: String, walletIDs: [String]) async throws { fatalError() }
+    func fullRescan(chainName: String, walletIDs: [String]) async throws { fatalError() }
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
@@ -163,6 +164,7 @@ protocol WalletServiceProtocol: Sendable {
 
     // Balances
     func scanBalances(chainName: String, walletIDs: [String]) async throws
+    func fullRescan(chainName: String, walletIDs: [String]) async throws
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
     func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance]
@@ -401,6 +403,14 @@ final class LiveWalletService: WalletServiceProtocol {
             params["railgunWalletIDs"] = walletIDs
         }
         let _ = try await bridge.callRaw("scanBalances", params: params, timeout: .seconds(120))
+    }
+
+    func fullRescan(chainName: String, walletIDs: [String]) async throws {
+        var params: [String: any Sendable] = ["chainName": chainName]
+        if !walletIDs.isEmpty {
+            params["railgunWalletIDs"] = walletIDs
+        }
+        let _ = try await bridge.callRaw("fullRescan", params: params, timeout: .seconds(600))
     }
 
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] {

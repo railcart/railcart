@@ -77,7 +77,6 @@ struct AccountDetailView: View {
                         railgunAddress: account.railgunAddress,
                         tokenBalances: privateTokenBalances,
                         chain: network.selectedChain,
-                        isLoading: balanceService?.isScanning ?? false,
                         isScanning: balanceService?.isScanning ?? false,
                         scanStep: balanceService?.scanStep,
                         scanProgress: balanceService?.scanProgress ?? 0,
@@ -167,7 +166,9 @@ struct AccountDetailView: View {
             ethBalance = try await balanceService.getEthBalance(
                 chainName: network.selectedChain.rawValue, address: address
             )
-        } catch {}
+        } catch {
+            AppLogger.shared.log("error", "Failed to load ETH balance: \(error.localizedDescription)")
+        }
 
         let tokenAddresses = Token.supported.compactMap { $0.address(on: network.selectedChain) }
         guard !tokenAddresses.isEmpty else { return }
@@ -180,7 +181,9 @@ struct AccountDetailView: View {
             for b in balances {
                 publicTokenBalances[b.tokenAddress.lowercased()] = b.amount
             }
-        } catch {}
+        } catch {
+            AppLogger.shared.log("error", "Failed to load ERC-20 balances: \(error.localizedDescription)")
+        }
     }
 
     /// Force-refresh private balances for all wallets (invalidates cache first).

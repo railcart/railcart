@@ -19,8 +19,9 @@ final class AppLogger {
     private(set) var entries: [LogEntry] = []
     private let maxEntries = 2000
 
+    let logFileURL: URL?
     private let fileHandle: FileHandle?
-    private let dateFormatter: DateFormatter = {
+    static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         return f
@@ -33,9 +34,7 @@ final class AppLogger {
         let message: String
 
         var formatted: String {
-            let f = DateFormatter()
-            f.dateFormat = "HH:mm:ss.SSS"
-            return "[\(f.string(from: timestamp))] [\(category)] \(message)"
+            "[\(AppLogger.dateFormatter.string(from: timestamp))] [\(category)] \(message)"
         }
     }
 
@@ -45,6 +44,7 @@ final class AppLogger {
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
 
         let logFile = logDir.appendingPathComponent("railcart.log")
+        logFileURL = logFile
 
         // Rotate if over 2 MB
         if let attrs = try? FileManager.default.attributesOfItem(atPath: logFile.path),
