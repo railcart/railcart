@@ -84,13 +84,24 @@ struct UnknownTokenRow: View {
                 .foregroundStyle(.secondary)
                 .frame(width: 32, height: 32)
             VStack(alignment: .leading, spacing: 1) {
-                Text(balance.shortTokenAddress)
-                    .font(.body.monospaced().bold())
-                Text(balance.tokenAddress)
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
+                Text("Unknown")
+                    .font(.body.bold())
+                HStack(spacing: 4) {
+                    Text(balance.tokenAddress)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(balance.tokenAddress, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy contract address")
+                }
             }
             Spacer(minLength: 4)
             Text(balance.formattedAmount)
