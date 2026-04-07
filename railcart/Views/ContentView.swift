@@ -6,6 +6,7 @@
 
 import SwiftUI
 
+
 struct ContentView: View {
     @Environment(NodeBridge.self) private var bridge
     @Environment(\.walletService) private var service
@@ -13,12 +14,10 @@ struct ContentView: View {
     @Environment(NetworkState.self) private var network
     @Environment(WalletState.self) private var walletState
 
-    @State private var isAddingWallet = false
     @State private var selection: SidebarItem?
 
     enum SidebarItem: Hashable {
         case account(String)  // account ID
-        case shield
         case transactions
     }
 
@@ -32,24 +31,15 @@ struct ContentView: View {
                             Label(account.name, systemImage: "wallet.bifold")
                         }
                     }
-                    Button {
-                        Task { await addWallet() }
-                    } label: {
-                        Label(isAddingWallet ? "Creating..." : "Add Wallet", systemImage: "plus")
-                    }
-                    .foregroundStyle(.secondary)
-                    .disabled(walletState.step != .ready || isAddingWallet)
                 }
                 Section("Actions") {
-                    NavigationLink(value: SidebarItem.shield) {
-                        Label("Shield", systemImage: "shield.lefthalf.filled")
-                    }
                     NavigationLink(value: SidebarItem.transactions) {
                         Label("Transactions", systemImage: "clock")
                     }
                 }
             }
-            .navigationTitle("RAILGUN")
+            .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
+            .toolbar(removing: .sidebarToggle)
             .accessibilityIdentifier("mainSidebar")
             .onChange(of: walletState.step) {
                 if walletState.step == .ready, selection == nil,
@@ -67,8 +57,6 @@ struct ContentView: View {
             case .account(let id):
                 AccountDetailView(accountID: id)
                     .id(id)
-            case .shield:
-                ShieldView()
             case .transactions:
                 TransactionListView()
             case nil:
@@ -115,8 +103,16 @@ struct ContentView: View {
             balanceService?.resetScanState()
             Task { await syncPrivateBalances() }
         }
-        .toolbar(removing: .sidebarToggle)
         .toolbar {
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    Task { await walletState.addWallet(using: service) }
+                } label: {
+                    Label("Add Wallet", systemImage: "plus")
+                        .labelStyle(.titleAndIcon)
+                }
+                .disabled(walletState.step != .ready || walletState.isAddingWallet)
+            }
             ToolbarItem(placement: .automatic) {
                 Picker("Network", selection: $network.selectedChain) {
                     ForEach(Chain.allCases) { chain in
@@ -165,51 +161,4 @@ struct ContentView: View {
         await balanceService.scanAllPrivateBalances(chainName: chain.rawValue, walletIDs: walletIDs)
     }
 
-    private func addWallet() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey),
-              let firstAccount = walletState.accounts.first else { return }
-
-        isAddingWallet = true
-        defer { isAddingWallet = false }
-
-        let index = walletState.nextDerivationIndex
-
-        do {
-            // Retrieve the mnemonic from the first wallet
-            let mnemonic = try await service.getWalletMnemonic(
-                encryptionKey: encryptionKey,
-                walletID: firstAccount.id
-            )
-
-            // Fetch current block numbers so the SDK skips scanning older blocks
-            var creationBlocks: [String: Int] = [:]
-            for chainName in Config.chainProviders.keys {
-                if let block = try? await service.getBlockNumber(chainName: chainName) {
-                    creationBlocks[chainName] = block
-                }
-            }
-
-            // Create a new RAILGUN wallet at the next derivation index
-            let walletInfo = try await service.createWallet(
-                encryptionKey: encryptionKey,
-                mnemonic: mnemonic,
-                derivationIndex: index,
-                creationBlockNumbers: creationBlocks
-            )
-
-            let account = Account(
-                id: walletInfo.id,
-                derivationIndex: walletInfo.derivationIndex,
-                railgunAddress: walletInfo.railgunAddress,
-                name: "Wallet \(index + 1)"
-            )
-            let unlocked = Account.Unlocked(
-                ethAddress: walletInfo.ethAddress,
-                ethPrivateKey: walletInfo.ethPrivateKey
-            )
-            walletState.addAccount(account, unlocked: unlocked)
-        } catch {
-            // TODO: surface error to user
-        }
-    }
 }

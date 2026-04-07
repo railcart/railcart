@@ -20,6 +20,10 @@ struct AccountDetailView: View {
     @State private var isEditingName = false
     @FocusState private var nameFieldFocused: Bool
 
+    // Shield/unshield sheets keyed by token symbol (so SwiftUI re-presents on change).
+    @State private var shieldToken: Token?
+    @State private var unshieldToken: Token?
+
     // Public balances
     @State private var ethBalance: String?
     @State private var publicTokenBalances: [String: String] = [:]
@@ -65,7 +69,8 @@ struct AccountDetailView: View {
                         tokenBalances: publicTokenBalances,
                         chain: network.selectedChain,
                         isLoading: isLoadingPublic,
-                        onRefresh: { Task { await loadPublicBalances(address: unlocked.ethAddress) } }
+                        onRefresh: { Task { await loadPublicBalances(address: unlocked.ethAddress) } },
+                        onShield: { token in shieldToken = token }
                     )
 
                     let pendingShields = pendingShieldTransactions(for: account)
@@ -81,7 +86,8 @@ struct AccountDetailView: View {
                         scanStep: balanceService?.scanStep,
                         scanProgress: balanceService?.scanProgress ?? 0,
                         errorMessage: nil,
-                        onRefresh: { Task { await refreshPrivateBalances() } }
+                        onRefresh: { Task { await refreshPrivateBalances() } },
+                        onUnshield: { token in unshieldToken = token }
                     )
                 }
                 .padding(20)
@@ -99,6 +105,12 @@ struct AccountDetailView: View {
                 try? await network.ensureProviderLoaded(for: network.selectedChain, using: walletService)
                 await loadPublicBalances(address: unlocked.ethAddress)
             }
+        }
+        .sheet(item: $shieldToken) { token in
+            ShieldSheet(token: token, account: account, unlocked: unlocked)
+        }
+        .sheet(item: $unshieldToken) { token in
+            UnshieldSheet(token: token, account: account, unlocked: unlocked)
         }
     }
 

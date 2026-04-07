@@ -16,6 +16,7 @@ struct PrivateBalanceSection: View {
     let scanProgress: Double
     let errorMessage: String?
     let onRefresh: () -> Void
+    var onUnshield: ((Token) -> Void)? = nil
 
     var body: some View {
         BalanceCard {
@@ -72,8 +73,23 @@ struct PrivateBalanceSection: View {
                     let balance = address.flatMap { addr in
                         tokenBalances.first { $0.tokenAddress.lowercased() == addr.lowercased() }?.amount
                     }
-                    // Show "0" after sync completes, "--" only while waiting for first sync
-                    TokenRow(token: token, balance: balance ?? (hasSynced ? "0" : nil))
+                    let displayBalance = balance ?? (hasSynced ? "0" : nil)
+                    // Only WETH supports unshield-to-ETH today (base token path).
+                    let isWETH = token.symbol == "WETH"
+                    let state: TokenActionState = if !isWETH {
+                        .unsupported
+                    } else if hasNonZero(displayBalance) {
+                        .enabled
+                    } else {
+                        .zeroBalance
+                    }
+                    TokenRow(
+                        token: token,
+                        balance: displayBalance,
+                        action: .unshield,
+                        actionState: state,
+                        onAction: { onUnshield?(token) }
+                    )
                 }
 
                 // Unknown tokens from scan
@@ -88,5 +104,10 @@ struct PrivateBalanceSection: View {
                 }
             }
         }
+    }
+
+    private func hasNonZero(_ wei: String?) -> Bool {
+        guard let wei, let value = Decimal(string: wei) else { return false }
+        return value > 0
     }
 }

@@ -47,9 +47,38 @@ struct TokenIconView: View {
     }
 }
 
+enum TokenCellAction {
+    case shield      // public → private
+    case unshield    // private → public/elsewhere
+
+    var systemImage: String {
+        switch self {
+        case .shield: "arrow.down"
+        case .unshield: "arrow.up.right"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .shield: "Shield"
+        case .unshield: "Unshield"
+        }
+    }
+}
+
+enum TokenActionState {
+    case enabled
+    case zeroBalance
+    case unsupported    // backend doesn't implement this token's shield/unshield yet
+    case hidden
+}
+
 struct TokenRow: View {
     let token: Token
     let balance: String?
+    var action: TokenCellAction? = nil
+    var actionState: TokenActionState = .hidden
+    var onAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -63,14 +92,57 @@ struct TokenRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            Text(balance.map { token.formatBalance($0) } ?? "--")
-                .font(.body.monospaced().bold())
-                .foregroundStyle(.primary)
-                .lineLimit(1)
+            VStack(alignment: .trailing, spacing: 6) {
+                Text(balance.map { token.formatBalance($0) } ?? "--")
+                    .font(.body.monospaced().bold())
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                if let action, actionState != .hidden {
+                    actionPill(action)
+                }
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)
         .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 10))
+    }
+
+    @ViewBuilder
+    private func actionPill(_ action: TokenCellAction) -> some View {
+        let enabled = actionState == .enabled
+        Button {
+            onAction?()
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: action.systemImage)
+                Text(action.label)
+            }
+            .font(.caption.bold())
+            .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule().fill(enabled ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.1))
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    enabled ? Color.accentColor.opacity(0.4) : Color.secondary.opacity(0.25),
+                    lineWidth: 0.5
+                )
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .help(tooltip(for: action))
+    }
+
+    private func tooltip(for action: TokenCellAction) -> String {
+        switch actionState {
+        case .enabled: action.label
+        case .zeroBalance: "No \(token.symbol) to \(action.label.lowercased())"
+        case .unsupported: "\(action.label) for \(token.symbol) coming soon"
+        case .hidden: ""
+        }
     }
 }
 

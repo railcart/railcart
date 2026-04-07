@@ -14,6 +14,7 @@ struct PublicBalanceSection: View {
     let chain: Chain
     let isLoading: Bool
     let onRefresh: () -> Void
+    var onShield: ((Token) -> Void)? = nil
 
     var body: some View {
         BalanceCard {
@@ -40,14 +41,31 @@ struct PublicBalanceSection: View {
 
             // Token balance grid
             LazyVGrid(columns: tokenGridColumns, spacing: 10) {
-                TokenRow(token: .eth, balance: ethBalance)
+                TokenRow(
+                    token: .eth,
+                    balance: ethBalance,
+                    action: .shield,
+                    actionState: hasNonZero(ethBalance) ? .enabled : .zeroBalance,
+                    onAction: { onShield?(.eth) }
+                )
 
                 ForEach(Token.supported) { token in
                     let address = token.address(on: chain)
                     let balance = address.flatMap { tokenBalances[$0.lowercased()] }
-                    TokenRow(token: token, balance: balance)
+                    TokenRow(
+                        token: token,
+                        balance: balance,
+                        action: .shield,
+                        actionState: .unsupported,  // ERC-20 shield bridge not implemented yet
+                        onAction: { onShield?(token) }
+                    )
                 }
             }
         }
+    }
+
+    private func hasNonZero(_ wei: String?) -> Bool {
+        guard let wei, let value = Decimal(string: wei) else { return false }
+        return value > 0
     }
 }

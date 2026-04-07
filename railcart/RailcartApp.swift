@@ -13,7 +13,6 @@ struct RailcartApp: App {
     @State private var walletService: LiveWalletService
     @State private var balanceService: BalanceService
     @State private var walletState: WalletState
-    @State private var shieldState = ShieldState()
     @State private var broadcasterState = BroadcasterState()
     @State private var networkState = NetworkState()
     @State private var transactionStore: TransactionStore
@@ -56,7 +55,6 @@ struct RailcartApp: App {
                 .environment(\.balanceService, balanceService)
                 .environment(bridge)
                 .environment(walletState)
-                .environment(shieldState)
                 .environment(broadcasterState)
                 .environment(networkState)
                 .environment(transactionStore)
@@ -76,6 +74,11 @@ struct RailcartApp: App {
         }
         .commands {
             CommandGroup(after: .newItem) {
+                Button("Add Wallet") {
+                    Task { await walletState.addWallet(using: walletService) }
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
+                .disabled(walletState.step != .ready || walletState.isAddingWallet)
                 Button("Import Wallet...") {
                     walletState.showImportSheet = true
                 }

@@ -33,6 +33,7 @@ final class WalletState {
     var mnemonic: String?
 
     var showImportSheet = false
+    var isAddingWallet = false
 
     private var lockTimer: Timer?
     private var isPreview = false
@@ -73,6 +74,51 @@ final class WalletState {
     func setAccountsForPreview(_ newAccounts: [Account]) {
         isPreview = true
         accounts = newAccounts
+    }
+
+    func addWallet(using service: any WalletServiceProtocol) async {
+        guard let encryptionKey = KeychainHelper.load(.encryptionKey),
+              let firstAccount = accounts.first else { return }
+
+        isAddingWallet = true
+        defer { isAddingWallet = false }
+
+        let index = nextDerivationIndex
+
+        do {
+            let mnemonic = try await service.getWalletMnemonic(
+                encryptionKey: encryptionKey,
+                walletID: firstAccount.id
+            )
+
+            var creationBlocks: [String: Int] = [:]
+            for chainName in Config.chainProviders.keys {
+                if let block = try? await service.getBlockNumber(chainName: chainName) {
+                    creationBlocks[chainName] = block
+                }
+            }
+
+            let walletInfo = try await service.createWallet(
+                encryptionKey: encryptionKey,
+                mnemonic: mnemonic,
+                derivationIndex: index,
+                creationBlockNumbers: creationBlocks
+            )
+
+            let account = Account(
+                id: walletInfo.id,
+                derivationIndex: walletInfo.derivationIndex,
+                railgunAddress: walletInfo.railgunAddress,
+                name: "Wallet \(index + 1)"
+            )
+            let unlocked = Account.Unlocked(
+                ethAddress: walletInfo.ethAddress,
+                ethPrivateKey: walletInfo.ethPrivateKey
+            )
+            addAccount(account, unlocked: unlocked)
+        } catch {
+            // TODO: surface error to user
+        }
     }
 
     private func startLockTimer() {
