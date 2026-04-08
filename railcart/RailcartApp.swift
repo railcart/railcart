@@ -16,6 +16,7 @@ struct RailcartApp: App {
     @State private var broadcasterState = BroadcasterState()
     @State private var networkState = NetworkState()
     @State private var transactionStore: TransactionStore
+    @State private var updateController = UpdateController()
 
     static let isUITesting = CommandLine.arguments.contains("--ui-testing")
 
@@ -58,6 +59,7 @@ struct RailcartApp: App {
                 .environment(broadcasterState)
                 .environment(networkState)
                 .environment(transactionStore)
+                .environment(updateController)
                 .task {
                     try? await bridge.start()
                     if Self.isUITesting {
@@ -84,6 +86,11 @@ struct RailcartApp: App {
                 }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(walletState.step != .ready)
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") {
+                    updateController.checkForUpdates()
+                }
             }
             CommandGroup(after: .windowArrangement) {
                 Button("Debug Log") {

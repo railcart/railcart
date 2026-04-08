@@ -13,6 +13,7 @@ struct ContentView: View {
     @Environment(\.balanceService) private var balanceService
     @Environment(NetworkState.self) private var network
     @Environment(WalletState.self) private var walletState
+    @Environment(UpdateController.self) private var updateController
 
     @State private var selection: SidebarItem?
 
@@ -120,6 +121,15 @@ struct ContentView: View {
                     }
                 }
                 .pickerStyle(.menu)
+            }
+            ToolbarItem(placement: .automatic) {
+                Button {
+                    updateController.checkForUpdates()
+                } label: {
+                    Image(systemName: "arrow.down.circle")
+                        .foregroundStyle(updateController.updateAvailable ? Color.accentColor : Color.primary)
+                }
+                .help(updateController.updateAvailable ? "Update available" : "Check for updates")
             }
         }
     }
