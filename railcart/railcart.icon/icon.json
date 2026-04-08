@@ -1,20 +1,75 @@
 {
   "fill" : {
-    "solid" : "extended-gray:0.25000,1.00000"
+    "linear-gradient" : [
+      "display-p3:0.61546,0.91053,1.00000,1.00000",
+      "extended-srgb:0.00000,0.53333,1.00000,1.00000"
+    ],
+    "orientation" : {
+      "start" : {
+        "x" : 0.5,
+        "y" : 0
+      },
+      "stop" : {
+        "x" : 0.5,
+        "y" : 0.7
+      }
+    }
   },
   "groups" : [
     {
       "layers" : [
         {
-          "glass" : false,
-          "hidden" : false,
-          "image-name" : "railcart 2.png",
-          "name" : "railcart 2",
+          "glass" : true,
+          "hidden" : true,
+          "image-name" : "railcart_bw.svg",
+          "name" : "railcart_bw",
           "position" : {
-            "scale" : 2,
+            "scale" : 16,
             "translation-in-points" : [
-              0,
-              -73
+              -1.0399999999999636,
+              -112.95842591619657
+            ]
+          }
+        }
+      ],
+      "shadow" : {
+        "kind" : "neutral",
+        "opacity" : 0.5
+      },
+      "translucency" : {
+        "enabled" : true,
+        "value" : 0.5
+      }
+    },
+    {
+      "layers" : [
+        {
+          "blend-mode" : "normal",
+          "fill" : {
+            "linear-gradient" : [
+              "display-p3:0.64320,0.83302,1.03850,1.00000",
+              "display-p3:0.52941,0.75538,1.00000,1.00000"
+            ],
+            "orientation" : {
+              "start" : {
+                "x" : 0.2178830788352273,
+                "y" : 0.8896619278807745
+              },
+              "stop" : {
+                "x" : 0.8329066051136365,
+                "y" : 0.18377757104937903
+              }
+            }
+          },
+          "glass" : true,
+          "hidden" : false,
+          "image-name" : "railcart_w.svg",
+          "name" : "railcart_w",
+          "position" : {
+            "scale" : 16,
+            "translation-in-points" : [
+              1.0399999999999636,
+              -111.97021888197276
             ]
           }
         }
@@ -30,9 +85,6 @@
     }
   ],
   "supported-platforms" : {
-    "circles" : [
-      "watchOS"
-    ],
     "squares" : "shared"
   }
 }
