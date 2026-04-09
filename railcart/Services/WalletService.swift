@@ -44,6 +44,7 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
+    func loadChainProviderFromRemoteConfig(chainName: String) async throws { fatalError() }
 }
 
 // MARK: - Response Types
@@ -171,6 +172,7 @@ protocol WalletServiceProtocol: Sendable {
 
     // Settings
     func loadChainProvider(chainName: String, providerUrl: String) async throws
+    func loadChainProviderFromRemoteConfig(chainName: String) async throws
 }
 
 // MARK: - Live Implementation
@@ -430,6 +432,12 @@ final class LiveWalletService: WalletServiceProtocol {
         let _ = try await bridge.callRaw("loadChainProvider", params: [
             "chainName": chainName,
             "providerUrl": providerUrl,
+        ])
+    }
+
+    func loadChainProviderFromRemoteConfig(chainName: String) async throws {
+        let _ = try await bridge.callRaw("loadChainProviderFromRemoteConfig", params: [
+            "chainName": chainName,
         ])
     }
 }

@@ -52,6 +52,14 @@ struct RailcartApp: App {
                 )) {
                     ImportWalletView()
                 }
+                #if DEBUG
+                .sheet(isPresented: Binding(
+                    get: { walletState.showReplaceMnemonicSheet },
+                    set: { walletState.showReplaceMnemonicSheet = $0 }
+                )) {
+                    ReplaceCoreMnemonicView()
+                }
+                #endif
                 .environment(\.walletService, walletService)
                 .environment(\.balanceService, balanceService)
                 .environment(bridge)
@@ -97,6 +105,13 @@ struct RailcartApp: App {
                     openWindow(id: "debug-log")
                 }
                 .keyboardShortcut("l", modifiers: [.command, .option])
+                #if DEBUG
+                Divider()
+                Button("Replace Core Mnemonic…") {
+                    walletState.showReplaceMnemonicSheet = true
+                }
+                .disabled(walletState.step != .ready)
+                #endif
             }
         }
 

@@ -11,6 +11,7 @@ import * as snarkjs from "snarkjs";
 import leveldown from "leveldown";
 import fs from "fs/promises";
 import path from "path";
+import { loadRemoteConfig, getCachedRemoteConfig } from "./remote-config.js";
 
 let engineInitialized = false;
 
@@ -74,7 +75,21 @@ export function registerEngineInitMethods() {
     const db = leveldown(dbDir);
     const artifactStore = createArtifactStore(dataDir);
 
-    const poiNodeURLs = ["https://ppoi-agg.horsewithsixlegs.xyz"];
+    // Fetch the official RAILGUN remote config from the on-chain contract.
+    // This gives us community-maintained POI aggregator URLs (and version
+    // pins, etc.) without hardcoding values that may rotate. Falls back to
+    // the public test aggregator if the contract call fails.
+    const FALLBACK_POI_URL = "https://ppoi-agg.horsewithsixlegs.xyz";
+    let poiNodeURLs = [FALLBACK_POI_URL];
+    try {
+      const remoteConfig = await loadRemoteConfig();
+      if (Array.isArray(remoteConfig.publicPoiAggregatorUrls) && remoteConfig.publicPoiAggregatorUrls.length > 0) {
+        poiNodeURLs = [...remoteConfig.publicPoiAggregatorUrls, FALLBACK_POI_URL];
+      }
+      process.stderr.write(`[sync] Loaded remote config (${poiNodeURLs.length} POI aggregator URLs)\n`);
+    } catch (err) {
+      process.stderr.write(`[sync] Remote config fetch failed, using fallback POI URL: ${err?.message || err}\n`);
+    }
 
     await startRailgunEngine(
       "rgwallet",       // walletSource (max 16 chars, lowercase)
@@ -164,5 +179,51 @@ export function registerEngineInitMethods() {
     await loadProvider(providerConfig, networkName);
     process.stderr.write(`[sync] Loaded provider for ${chainName} (${networkName})\n`);
     return { chainName, loaded: true };
+  });
+
+  /**
+   * Load an RPC provider for a chain using the URL list from the cached
+   * remote config. Throws if the remote config hasn't loaded or doesn't
+   * contain an entry for this chain.
+   *
+   * params: { chainName: string }
+   */
+  registerMethod("loadChainProviderFromRemoteConfig", async (params) => {
+    if (!engineInitialized) {
+      throw new Error("Engine not initialized. Call initEngine first.");
+    }
+    const { chainName } = params;
+    const remoteConfig = getCachedRemoteConfig();
+    if (!remoteConfig || !remoteConfig.network) {
+      throw new Error("Remote config not available");
+    }
+
+    const { networkName, chain } = chainForName(chainName);
+    const entry = remoteConfig.network[chain.id] || remoteConfig.network[String(chain.id)];
+    if (!entry || !Array.isArray(entry.providers) || entry.providers.length === 0) {
+      throw new Error(`Remote config has no providers for chain ${chainName} (id ${chain.id})`);
+    }
+
+    // Normalize each entry: strings become a default ProviderJson, objects pass through.
+    const providers = entry.providers
+      .map((p) => {
+        if (typeof p === "string") {
+          return { provider: p, priority: 3, weight: 2, stallTimeout: 2500, maxLogsPerBatch: 2 };
+        }
+        if (p && typeof p === "object" && typeof p.provider === "string") {
+          return p;
+        }
+        return null;
+      })
+      .filter(Boolean);
+
+    if (providers.length === 0) {
+      throw new Error(`Remote config providers for ${chainName} were unparseable`);
+    }
+
+    const providerConfig = { chainId: chain.id, providers };
+    await loadProvider(providerConfig, networkName);
+    process.stderr.write(`[sync] Loaded ${providers.length} provider(s) from remote config for ${chainName} (${networkName})\n`);
+    return { chainName, loaded: true, providerCount: providers.length };
   });
 }

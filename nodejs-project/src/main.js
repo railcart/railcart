@@ -2,6 +2,7 @@ import { startBridge, registerMethod, sendEvent } from "./bridge.js";
 import { registerEngineInitMethods } from "./engine-init.js";
 import { registerBroadcasterMethods } from "./broadcaster.js";
 import { registerWalletMethods } from "./wallet.js";
+import { registerRemoteConfigMethods } from "./remote-config.js";
 
 // Prevent unhandled errors from crashing the process
 process.on("unhandledRejection", (err) => {
@@ -26,6 +27,7 @@ registerMethod("getStatus", async () => ({
 registerEngineInitMethods();
 registerBroadcasterMethods();
 registerWalletMethods();
+registerRemoteConfigMethods();
 
 // Start the bridge
 startBridge();

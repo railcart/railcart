@@ -51,6 +51,19 @@ final class NetworkState {
     /// Returns immediately if already loaded.
     func ensureProviderLoaded(for chain: Chain, using service: any WalletServiceProtocol) async throws {
         guard !loadedChains.contains(chain) else { return }
+
+        // Prefer the RPC URLs published in the on-chain RAILGUN remote config
+        // (multiple providers per chain with built-in fallback). Fall back to
+        // the hardcoded Config.chainProviders entry if the remote config has
+        // no entry for this chain or the call fails.
+        do {
+            try await service.loadChainProviderFromRemoteConfig(chainName: chain.rawValue)
+            loadedChains.insert(chain)
+            return
+        } catch {
+            // Fall through to hardcoded provider
+        }
+
         guard let url = Config.chainProviders[chain.rawValue], !url.isEmpty else { return }
         try await service.loadChainProvider(chainName: chain.rawValue, providerUrl: url)
         loadedChains.insert(chain)

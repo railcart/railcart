@@ -72,4 +72,5 @@ struct MockWalletService: WalletServiceProtocol {
     }
 
     func loadChainProvider(chainName: String, providerUrl: String) async throws {}
+    func loadChainProviderFromRemoteConfig(chainName: String) async throws {}
 }

@@ -83,7 +83,8 @@ struct LogWindowView: View {
         HStack(alignment: .top, spacing: 8) {
             Text(timeString(entry.timestamp))
                 .foregroundStyle(.tertiary)
-                .frame(width: 80, alignment: .leading)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
 
             Text(entry.category)
                 .foregroundStyle(categoryColor(entry.category))
