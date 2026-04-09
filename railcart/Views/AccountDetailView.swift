@@ -48,6 +48,15 @@ struct AccountDetailView: View {
     var body: some View {
         if let account, let unlocked {
             accountView(account: account, unlocked: unlocked)
+        } else if account != nil, walletState.step != .ready {
+            // Account exists in persisted list but engine/wallet hasn't finished
+            // loading yet — show a progress state instead of a scary error.
+            VStack(spacing: 12) {
+                ProgressView()
+                Text("Loading wallet…")
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView(
                 "Account Not Found",
