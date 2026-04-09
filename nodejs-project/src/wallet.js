@@ -76,8 +76,8 @@ export function registerWalletMethods() {
     if (!mnemonic) throw new Error("mnemonic is required");
 
     const words = mnemonic.trim().split(/\s+/);
-    if (words.length !== 12 && words.length !== 24) {
-      return { valid: false, error: `Expected 12 or 24 words, got ${words.length}.` };
+    if (![12, 15, 18, 21, 24].includes(words.length)) {
+      return { valid: false, error: `Expected 12, 15, 18, 21, or 24 words, got ${words.length}.` };
     }
 
     // Check each word against the BIP-39 English wordlist

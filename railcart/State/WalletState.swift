@@ -34,6 +34,9 @@ final class WalletState {
 
     var showImportSheet = false
     var isAddingWallet = false
+    #if DEBUG
+    var showReplaceMnemonicSheet = false
+    #endif
 
     private var lockTimer: Timer?
     private var isPreview = false
