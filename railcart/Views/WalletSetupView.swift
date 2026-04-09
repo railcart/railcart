@@ -289,6 +289,9 @@ struct WalletSetupView: View {
         isWorking = true
         defer { isWorking = false }
 
+        var unlockedCount = 0
+        var failures: [String] = []
+
         for (index, account) in wallet.accounts.enumerated() {
             do {
                 let walletInfo = try await service.loadWallet(
@@ -309,11 +312,26 @@ struct WalletSetupView: View {
                     ethAddress: walletInfo.ethAddress,
                     ethPrivateKey: walletInfo.ethPrivateKey
                 ))
+                unlockedCount += 1
             } catch {
-                // Skip accounts that fail to load
+                let detail = "\(account.name) (\(account.id.prefix(8))…): \(error.localizedDescription)"
+                failures.append(detail)
+                AppLogger.shared.log("wallet", "loadWallet failed for \(detail)")
             }
         }
 
+        if unlockedCount == 0 && !wallet.accounts.isEmpty {
+            // Every account failed — keep the user on the unlock screen with
+            // a real error message instead of dropping them into a half-broken
+            // ready state where the sidebar lists wallets but every detail
+            // page says "Account Not Found".
+            errorMessage = "Failed to unlock any account:\n" + failures.joined(separator: "\n")
+            return
+        }
+
+        if !failures.isEmpty {
+            errorMessage = "Some accounts failed to unlock:\n" + failures.joined(separator: "\n")
+        }
         wallet.setStep(.ready)
     }
 
