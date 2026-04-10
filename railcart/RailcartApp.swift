@@ -118,5 +118,6 @@ struct RailcartApp: App {
         Window("Debug Log", id: "debug-log") {
             LogWindowView()
         }
+        .commandsRemoved()
     }
 }

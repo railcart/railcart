@@ -50,7 +50,7 @@ extension Token {
         iconAsset: "TokenIcons/token-weth",
         addresses: [
             .ethereum: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
-            .sepolia: "0x7b79995e5f793A07Bc00c21412e50Ecae098E7f9",
+            .sepolia: "0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14",
         ]
     )
 

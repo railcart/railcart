@@ -9,6 +9,9 @@ DerivedData/
 # macOS
 .DS_Store
 
+# other build caches
+packages/***/.build
+
 # release signing
 scripts/release/
 build/

@@ -223,7 +223,8 @@ export function registerEngineInitMethods() {
 
     const providerConfig = { chainId: chain.id, providers };
     await loadProvider(providerConfig, networkName);
+    const providerUrls = providers.map((p) => p.provider);
     process.stderr.write(`[sync] Loaded ${providers.length} provider(s) from remote config for ${chainName} (${networkName})\n`);
-    return { chainName, loaded: true, providerCount: providers.length };
+    return { chainName, loaded: true, providerCount: providers.length, providerUrls };
   });
 }

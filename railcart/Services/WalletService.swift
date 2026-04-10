@@ -205,12 +205,19 @@ final class LiveWalletService: WalletServiceProtocol {
         privateKey: String,
         txData: TransactionData
     ) async throws -> String {
+        let logger = AppLogger.shared
         let signer = try TransactionSigner(privateKey: privateKey)
         let fromAddress = try signer.address()
         let client = try rpc(for: chainName)
 
+        logger.log("rpc", "signAndSend: \(chainName) via \(client.url.host ?? client.url.absoluteString) from=\(fromAddress.hex)")
+
+        let balance = try await client.getBalance(address: fromAddress)
+        logger.log("rpc", "from balance=\(balance) wei")
+
         let nonce = try await client.getNonce(address: fromAddress)
         let chainId = try await client.getChainId()
+        logger.log("rpc", "nonce=\(nonce) chainId=\(chainId)")
 
         let toAddress = try RailcartChain.Address(txData.to)
         let value = BigUInt(txData.value) ?? 0
@@ -220,8 +227,9 @@ final class LiveWalletService: WalletServiceProtocol {
         if let gl = txData.gasLimit, let parsed = BigUInt(gl) {
             gasLimit = parsed
         } else {
-            gasLimit = try await client.estimateGas(to: toAddress, data: calldata, value: value)
+            gasLimit = try await client.estimateGas(from: fromAddress, to: toAddress, data: calldata, value: value)
         }
+        logger.log("rpc", "gasLimit=\(gasLimit)")
 
         // Determine gas pricing
         let gasPrice: UnsignedTransaction.GasPrice
@@ -231,9 +239,11 @@ final class LiveWalletService: WalletServiceProtocol {
             let maxPriority = feeData.maxPriorityFee
             let maxFee = feeData.baseFee * 2 + maxPriority
             gasPrice = .eip1559(maxFeePerGas: maxFee, maxPriorityFeePerGas: maxPriority)
+            logger.log("rpc", "EIP-1559 baseFee=\(feeData.baseFee) maxFee=\(maxFee) maxPriority=\(maxPriority)")
         } else {
             let gp = try await client.getGasPrice()
             gasPrice = .legacy(gasPrice: gp)
+            logger.log("rpc", "legacy gasPrice=\(gp)")
         }
 
         let tx = UnsignedTransaction(
@@ -247,8 +257,14 @@ final class LiveWalletService: WalletServiceProtocol {
         )
 
         let signed = try signer.sign(tx)
-        let txHash = try await client.sendRawTransaction(signed)
-        return txHash
+        do {
+            let txHash = try await client.sendRawTransaction(signed)
+            logger.log("rpc", "tx sent: \(txHash)")
+            return txHash
+        } catch {
+            logger.log("error", "sendRawTransaction failed: \(error.localizedDescription)")
+            throw error
+        }
     }
 
     func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation {
@@ -433,11 +449,20 @@ final class LiveWalletService: WalletServiceProtocol {
             "chainName": chainName,
             "providerUrl": providerUrl,
         ])
+        if let url = URL(string: providerUrl) {
+            rpcClients[chainName] = RPCClient(url: url)
+        }
     }
 
     func loadChainProviderFromRemoteConfig(chainName: String) async throws {
-        let _ = try await bridge.callRaw("loadChainProviderFromRemoteConfig", params: [
+        struct RemoteConfigProviderResponse: Decodable {
+            let providerUrls: [String]?
+        }
+        let result = try await bridge.call("loadChainProviderFromRemoteConfig", params: [
             "chainName": chainName,
-        ])
+        ], as: RemoteConfigProviderResponse.self)
+        if let firstUrl = result.providerUrls?.first, let url = URL(string: firstUrl) {
+            rpcClients[chainName] = RPCClient(url: url)
+        }
     }
 }

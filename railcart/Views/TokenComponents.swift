@@ -117,6 +117,7 @@ struct TokenRow: View {
                 Image(systemName: action.systemImage)
                 Text(action.label)
             }
+            .fixedSize()
             .font(.caption.bold())
             .foregroundStyle(enabled ? Color.accentColor : Color.secondary)
             .padding(.horizontal, 10)

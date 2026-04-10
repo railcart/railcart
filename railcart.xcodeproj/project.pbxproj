@@ -217,7 +217,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */,
-				D0SPARKLE0100000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */,
+				D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = D07847A12F71C5D40008E08D /* Products */;
@@ -628,17 +628,13 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = packages/RailcartChain;
 		};
+		D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = vendor/Sparkle;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCRemoteSwiftPackageReference section */
-		D0SPARKLE0100000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
-			isa = XCRemoteSwiftPackageReference;
-			repositoryURL = "https://github.com/sparkle-project/Sparkle";
-			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.6.0;
-			};
-		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -649,7 +645,7 @@
 		};
 		D0SPARKLE0100000000000003 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = D0SPARKLE0100000000000002 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			package = D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */;
 			productName = Sparkle;
 		};
 /* End XCSwiftPackageProductDependency section */

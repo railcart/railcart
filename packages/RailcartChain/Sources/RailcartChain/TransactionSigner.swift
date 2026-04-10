@@ -51,15 +51,30 @@ public struct TransactionSigner: Sendable {
 
     // MARK: - Private
 
+    /// secp256k1 curve order
+    private static let curveOrder = BigUInt("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141", radix: 16)!
+    private static let halfCurveOrder = curveOrder >> 1
+
     private func ecdsaSign(hash: Data) throws -> (r: BigUInt, s: BigUInt, recoveryId: Int) {
         let key = try P256K.Recovery.PrivateKey(dataRepresentation: privateKeyData)
 
-        let signature = try key.signature(for: hash)
+        // Use the Digest overload to sign the raw hash directly.
+        // The DataProtocol overload would SHA-256 hash the input first,
+        // double-hashing and producing a wrong recovered address.
+        let digest = HashDigest(Array(hash))
+        let signature = try key.signature(for: digest)
         let compact = try signature.compactRepresentation
 
         let r = BigUInt(Data(compact.signature.prefix(32)))
-        let s = BigUInt(Data(compact.signature.suffix(32)))
-        let recoveryId = Int(compact.recoveryId)
+        var s = BigUInt(Data(compact.signature.suffix(32)))
+        var recoveryId = Int(compact.recoveryId)
+
+        // EIP-2: enforce low-s to ensure canonical signatures.
+        // Without this, the recovered address may differ from the signer.
+        if s > Self.halfCurveOrder {
+            s = Self.curveOrder - s
+            recoveryId ^= 1
+        }
 
         return (r, s, recoveryId)
     }

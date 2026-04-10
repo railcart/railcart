@@ -60,7 +60,7 @@ struct PendingShieldView: View {
 
             Spacer()
 
-            Text(elapsed(since: tx.timestamp, now: now))
+            Text(remaining(since: tx.timestamp, now: now))
                 .font(.caption.monospaced())
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
@@ -70,8 +70,12 @@ struct PendingShieldView: View {
         .background(.fill.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 
-    private func elapsed(since date: Date, now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(date)))
+    /// PPOI verification typically completes within 60 minutes.
+    private static let verificationDuration: TimeInterval = 3600
+
+    private func remaining(since date: Date, now: Date) -> String {
+        let elapsed = now.timeIntervalSince(date)
+        let seconds = max(0, Int(Self.verificationDuration - elapsed))
         let m = seconds / 60
         let s = seconds % 60
         if m >= 60 {

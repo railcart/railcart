@@ -50,8 +50,9 @@ public struct RPCClient: Sendable {
     }
 
     /// Estimate gas for a transaction.
-    public func estimateGas(to: Address, data: Data, value: BigUInt) async throws -> BigUInt {
+    public func estimateGas(from: Address, to: Address, data: Data, value: BigUInt) async throws -> BigUInt {
         let params: [String: String] = [
+            "from": from.hex,
             "to": to.hex,
             "data": "0x" + data.hexString,
             "value": "0x" + String(value, radix: 16),
@@ -89,7 +90,7 @@ public struct RPCClient: Sendable {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-            throw RPCError.httpError(http.statusCode)
+            throw RPCError.httpError(http.statusCode, method: method, url: url.host ?? url.absoluteString)
         }
 
         let rpcResponse = try JSONDecoder().decode(JSONRPCResponse<R>.self, from: data)
@@ -136,7 +137,7 @@ private struct BlockResult: Decodable {
 
 public enum RPCError: LocalizedError, Sendable {
     case invalidURL(String)
-    case httpError(Int)
+    case httpError(Int, method: String, url: String)
     case rpcError(code: Int, message: String)
     case noResult
     case invalidHex(String)
@@ -144,7 +145,7 @@ public enum RPCError: LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalidURL(let url): "Invalid RPC URL: \(url)"
-        case .httpError(let code): "HTTP error: \(code)"
+        case .httpError(let code, let method, let url): "HTTP \(code) from \(url) (\(method))"
         case .rpcError(_, let message): "RPC error: \(message)"
         case .noResult: "No result from RPC"
         case .invalidHex(let hex): "Invalid hex value: \(hex)"
