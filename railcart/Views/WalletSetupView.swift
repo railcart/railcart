@@ -339,7 +339,7 @@ struct WalletSetupView: View {
     /// Used as creationBlockNumbers so the SDK skips scanning older blocks.
     private func fetchCreationBlockNumbers() async -> [String: Int] {
         var blocks: [String: Int] = [:]
-        for chainName in Config.chainProviders.keys {
+        for chainName in Chain.allCases.map(\.rawValue) {
             if let blockNumber = try? await service.getBlockNumber(chainName: chainName) {
                 blocks[chainName] = blockNumber
             }

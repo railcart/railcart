@@ -16,10 +16,12 @@ struct ContentView: View {
     @Environment(UpdateController.self) private var updateController
 
     @State private var selection: SidebarItem?
+    @State private var visibleProviderError: ProviderError?
 
     enum SidebarItem: Hashable {
         case account(String)  // account ID
         case transactions
+        case settings
     }
 
     var body: some View {
@@ -38,6 +40,16 @@ struct ContentView: View {
                         Label("Transactions", systemImage: "clock")
                     }
                 }
+            }
+            .safeAreaInset(edge: .bottom) {
+                List(selection: $selection) {
+                    NavigationLink(value: SidebarItem.settings) {
+                        Label("Settings", systemImage: "gearshape")
+                    }
+                }
+                .scrollDisabled(true)
+                .frame(height: 40)
+                .scrollContentBackground(.hidden)
             }
             .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 300)
             .toolbar(removing: .sidebarToggle)
@@ -60,6 +72,8 @@ struct ContentView: View {
                     .id(id)
             case .transactions:
                 TransactionListView()
+            case .settings:
+                SettingsView()
             case nil:
                 if let error = bridge.errorMessage {
                     ContentUnavailableView {
@@ -83,6 +97,55 @@ struct ContentView: View {
                         systemImage: "wallet.bifold",
                         description: Text("Create a wallet to get started.")
                     )
+                }
+            }
+        }
+        .overlay(alignment: .top) {
+            if let error = visibleProviderError {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.white)
+                    Text("Failed to connect to \(error.chain.displayName). Configure a custom RPC provider in Settings.")
+                        .foregroundStyle(.white)
+                        .font(.callout)
+                    Spacer()
+                    Button("Settings") {
+                        selection = .settings
+                        visibleProviderError = nil
+                        network.providerError = nil
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.white)
+                    .foregroundStyle(.red)
+                    .controlSize(.small)
+                    Button {
+                        visibleProviderError = nil
+                        network.providerError = nil
+                    } label: {
+                        Image(systemName: "xmark")
+                            .foregroundStyle(.white.opacity(0.8))
+                    }
+                    .buttonStyle(.borderless)
+                }
+                .padding(12)
+                .background(Color.red, in: RoundedRectangle(cornerRadius: 10))
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: visibleProviderError)
+        .onChange(of: network.providerError) {
+            if network.providerError == nil {
+                visibleProviderError = nil
+            } else {
+                let snapshot = network.providerError
+                Task {
+                    try? await Task.sleep(for: .seconds(3))
+                    // Only show if the error is still present and unchanged
+                    if network.providerError == snapshot {
+                        visibleProviderError = snapshot
+                    }
                 }
             }
         }

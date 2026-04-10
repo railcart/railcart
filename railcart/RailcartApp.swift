@@ -70,12 +70,14 @@ struct RailcartApp: App {
                 .environment(updateController)
                 .task {
                     try? await bridge.start()
+                    var initParams: [String: String] = [:]
                     if Self.isUITesting {
-                        let testDir = NSTemporaryDirectory() + "railcart-uitest"
-                        try? await bridge.callRaw("initEngine", params: ["dataDir": testDir])
-                    } else {
-                        try? await bridge.callRaw("initEngine")
+                        initParams["dataDir"] = NSTemporaryDirectory() + "railcart-uitest"
                     }
+                    if let customEthRPC = networkState.customRPCURLs[.ethereum] {
+                        initParams["ethereumRpcUrl"] = customEthRPC
+                    }
+                    try? await bridge.callRaw("initEngine", params: initParams)
                     // Load provider for the initial chain only; others load on demand
                     try? await networkState.ensureProviderLoaded(
                         for: networkState.selectedChain, using: walletService

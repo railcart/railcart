@@ -95,7 +95,7 @@ final class WalletState {
             )
 
             var creationBlocks: [String: Int] = [:]
-            for chainName in Config.chainProviders.keys {
+            for chainName in Chain.allCases.map(\.rawValue) {
                 if let block = try? await service.getBlockNumber(chainName: chainName) {
                     creationBlocks[chainName] = block
                 }

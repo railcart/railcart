@@ -60,6 +60,7 @@ export function registerEngineInitMethods() {
    *
    * params: {
    *   dataDir?: string  (defaults to ~/.railcart)
+   *   ethereumRpcUrl?: string  (custom Ethereum RPC for remote config fetch)
    * }
    */
   registerMethod("initEngine", async (params) => {
@@ -79,10 +80,12 @@ export function registerEngineInitMethods() {
     // This gives us community-maintained POI aggregator URLs (and version
     // pins, etc.) without hardcoding values that may rotate. Falls back to
     // the public test aggregator if the contract call fails.
+    // Uses the custom Ethereum RPC if provided, otherwise the Flashbots
+    // bootstrap RPC.
     const FALLBACK_POI_URL = "https://ppoi-agg.horsewithsixlegs.xyz";
     let poiNodeURLs = [FALLBACK_POI_URL];
     try {
-      const remoteConfig = await loadRemoteConfig();
+      const remoteConfig = await loadRemoteConfig(params.ethereumRpcUrl || undefined);
       if (Array.isArray(remoteConfig.publicPoiAggregatorUrls) && remoteConfig.publicPoiAggregatorUrls.length > 0) {
         poiNodeURLs = [...remoteConfig.publicPoiAggregatorUrls, FALLBACK_POI_URL];
       }
@@ -205,26 +208,35 @@ export function registerEngineInitMethods() {
     }
 
     // Normalize each entry: strings become a default ProviderJson, objects pass through.
-    const providers = entry.providers
+    const allProviders = entry.providers
       .map((p) => {
         if (typeof p === "string") {
-          return { provider: p, priority: 3, weight: 2, stallTimeout: 2500, maxLogsPerBatch: 2 };
+          return { provider: p, priority: 1, weight: 2 };
         }
         if (p && typeof p === "object" && typeof p.provider === "string") {
-          return p;
+          return { provider: p.provider, priority: 1, weight: 2 };
         }
         return null;
       })
       .filter(Boolean);
 
-    if (providers.length === 0) {
+    if (allProviders.length === 0) {
       throw new Error(`Remote config providers for ${chainName} were unparseable`);
     }
 
-    const providerConfig = { chainId: chain.id, providers };
-    await loadProvider(providerConfig, networkName);
-    const providerUrls = providers.map((p) => p.provider);
-    process.stderr.write(`[sync] Loaded ${providers.length} provider(s) from remote config for ${chainName} (${networkName})\n`);
-    return { chainName, loaded: true, providerCount: providers.length, providerUrls };
+    // Shuffle and try each provider individually until one loads successfully.
+    // Avoids FallbackProvider quorum issues while still providing resilience.
+    const shuffled = allProviders.sort(() => Math.random() - 0.5);
+    for (const candidate of shuffled) {
+      try {
+        const providerConfig = { chainId: chain.id, providers: [candidate] };
+        await loadProvider(providerConfig, networkName);
+        process.stderr.write(`[sync] Loaded provider from remote config for ${chainName} (${networkName}): ${candidate.provider}\n`);
+        return { chainName, loaded: true, providerCount: 1, providerUrls: [candidate.provider] };
+      } catch (err) {
+        process.stderr.write(`[sync] Provider ${candidate.provider} failed for ${chainName}: ${err?.message || err}\n`);
+      }
+    }
+    throw new Error(`All ${shuffled.length} remote config providers failed for ${chainName}`);
   });
 }

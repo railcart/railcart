@@ -11,10 +11,9 @@ const REMOTE_CONFIG_ABI = [
 ];
 
 // Bootstrap RPC used solely for the one-shot remote-config contract call at
-// startup. Flashbots is privacy-respecting (no logging policy) and free.
-// After this call, the engine switches to providers from the remote config
-// itself for all subsequent chain access.
-const BOOTSTRAP_RPC = "https://rpc.flashbots.net";
+// startup. After this call, the engine switches to providers from the remote
+// config itself (or user-configured custom RPCs) for all subsequent chain access.
+const BOOTSTRAP_RPC = "https://eth.llamarpc.com";
 
 let cachedConfig = null;
 

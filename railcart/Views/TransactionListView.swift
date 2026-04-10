@@ -38,6 +38,7 @@ struct TransactionListView: View {
                     systemImage: "clock",
                     description: Text("Shield or unshield tokens to see your transaction history here.")
                 )
+                .frame(maxHeight: .infinity)
             } else {
                 List(filtered) { tx in
                     TransactionRow(

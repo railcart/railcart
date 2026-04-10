@@ -184,12 +184,6 @@ final class LiveWalletService: WalletServiceProtocol {
 
     init(bridge: NodeBridge) {
         self.bridge = bridge
-        // Pre-create RPC clients from config
-        for (chain, url) in Config.chainProviders where !url.isEmpty {
-            if let rpcURL = URL(string: url) {
-                rpcClients[chain] = RPCClient(url: rpcURL)
-            }
-        }
     }
 
     private func rpc(for chainName: String) throws -> RPCClient {

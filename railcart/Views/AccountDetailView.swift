@@ -127,10 +127,6 @@ struct AccountDetailView: View {
 
     private func walletHeader(account: Account) -> some View {
         HStack(spacing: 8) {
-            Image(systemName: "checkmark.shield.fill")
-                .font(.title2)
-                .foregroundStyle(.green)
-
             if isEditingName {
                 let binding = Binding<String>(
                     get: { account.name },
