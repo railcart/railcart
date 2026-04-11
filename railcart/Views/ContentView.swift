@@ -19,7 +19,7 @@ struct ContentView: View {
     @State private var visibleProviderError: ProviderError?
 
     enum SidebarItem: Hashable {
-        case account(String)  // account ID
+        case wallet(String)  // wallet ID
         case transactions
         case settings
     }
@@ -29,9 +29,9 @@ struct ContentView: View {
         NavigationSplitView {
             List(selection: $selection) {
                 Section("Wallets") {
-                    ForEach(walletState.accounts) { account in
-                        NavigationLink(value: SidebarItem.account(account.id)) {
-                            Label(account.name, systemImage: "wallet.bifold")
+                    ForEach(walletState.wallets) { wallet in
+                        NavigationLink(value: SidebarItem.wallet(wallet.id)) {
+                            Label(wallet.name, systemImage: "wallet.bifold")
                         }
                     }
                 }
@@ -56,19 +56,19 @@ struct ContentView: View {
             .accessibilityIdentifier("mainSidebar")
             .onChange(of: walletState.step) {
                 if walletState.step == .ready, selection == nil,
-                   let first = walletState.accounts.first {
-                    selection = .account(first.id)
+                   let first = walletState.wallets.first {
+                    selection = .wallet(first.id)
                 }
             }
             .onAppear {
-                if let first = walletState.accounts.first {
-                    selection = .account(first.id)
+                if let first = walletState.wallets.first {
+                    selection = .wallet(first.id)
                 }
             }
         } detail: {
             switch selection {
-            case .account(let id):
-                AccountDetailView(accountID: id)
+            case .wallet(let id):
+                WalletDetailView(walletID: id)
                     .id(id)
             case .transactions:
                 TransactionListView()
@@ -192,10 +192,10 @@ struct ContentView: View {
                 Button {
                     updateController.checkForUpdates()
                 } label: {
-                    Image(systemName: "arrow.down.circle")
-                        .foregroundStyle(updateController.updateAvailable ? Color.accentColor : Color.primary)
+                    Image(systemName: updateController.updateAvailable ? "arrow.down.circle.fill" : "checkmark.circle")
+                        .foregroundStyle(updateController.updateAvailable ? Color.accentColor : Color.secondary)
                 }
-                .help(updateController.updateAvailable ? "Update available" : "Check for updates")
+                .help(updateController.updateAvailable ? "Update available" : "Up to date")
             }
         }
     }
@@ -230,7 +230,7 @@ struct ContentView: View {
     private func syncPrivateBalances() async {
         guard walletState.step == .ready, let balanceService else { return }
         let chain = network.selectedChain
-        let walletIDs = walletState.accounts.map(\.id)
+        let walletIDs = walletState.wallets.map(\.id)
         guard !walletIDs.isEmpty else { return }
         guard !balanceService.hasAllPrivateBalances(chainName: chain.rawValue, walletIDs: walletIDs) else { return }
         try? await network.ensureProviderLoaded(for: chain, using: service)

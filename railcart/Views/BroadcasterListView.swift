@@ -266,6 +266,13 @@ struct BroadcasterInfo: Decodable, Sendable {
     let relayAdapt: String
     let reliability: Double
 
+    var shortRailgunAddress: String {
+        if railgunAddress.count > 16 {
+            return String(railgunAddress.prefix(8)) + "..." + String(railgunAddress.suffix(6))
+        }
+        return railgunAddress
+    }
+
     var shortTokenAddress: String {
         if tokenAddress.count > 12 {
             return String(tokenAddress.prefix(6)) + "..." + String(tokenAddress.suffix(4))

@@ -14,6 +14,7 @@ import {
   refreshBalances,
   generateUnshieldBaseTokenProof,
   populateProvedUnshieldBaseToken,
+  gasEstimateForUnprovenUnshieldBaseToken,
   getWalletMnemonic,
 } from "@railgun-community/wallet";
 import crypto from "crypto";
@@ -512,5 +513,210 @@ export function registerWalletMethods() {
     );
 
     return { transaction: serializeTransaction(result.transaction) };
+  });
+
+  // -----------------------------------------------------------------------
+  // Broadcaster-mediated unshield methods
+  // -----------------------------------------------------------------------
+
+  /**
+   * Estimate gas for an unshield via broadcaster and compute the fee amount.
+   *
+   * params: {
+   *   chainName: string,
+   *   railgunWalletID: string,
+   *   encryptionKey: string,
+   *   publicWalletAddress: string,
+   *   amount: string,          // in wei
+   *   feePerUnitGas: string,   // from broadcaster
+   * }
+   */
+  registerMethod("gasEstimateForBroadcasterUnshield", async (params) => {
+    requireEngine();
+    const { chainName, railgunWalletID, encryptionKey, publicWalletAddress, amount, feePerUnitGas } = params;
+    const { networkName } = chainForName(chainName);
+    const wrappedAddress = NETWORK_CONFIG[networkName].baseToken.wrappedAddress;
+    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
+
+    const wrappedERC20Amount = {
+      tokenAddress: wrappedAddress,
+      amount: BigInt(amount),
+    };
+
+    const provider = getFallbackProviderForNetwork(networkName);
+    const feeData = await provider.getFeeData();
+
+    let originalGasDetails;
+    if (feeData.maxFeePerGas != null) {
+      originalGasDetails = {
+        evmGasType: 2,
+        gasEstimate: 0n,
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? 1000000000n,
+      };
+    } else {
+      originalGasDetails = {
+        evmGasType: 1,
+        gasEstimate: 0n,
+        gasPrice: feeData.gasPrice ?? 1000000000n,
+      };
+    }
+
+    const feeTokenDetails = {
+      tokenAddress: wrappedAddress,
+      feePerUnitGas: BigInt(feePerUnitGas),
+    };
+
+    const result = await gasEstimateForUnprovenUnshieldBaseToken(
+      txidVersion,
+      networkName,
+      publicWalletAddress,
+      railgunWalletID,
+      encryptionKey,
+      wrappedERC20Amount,
+      originalGasDetails,
+      feeTokenDetails,
+      false, // sendWithPublicWallet — broadcaster pays gas
+    );
+
+    const gasEstimate = result.gasEstimate;
+    const broadcasterFeeAmount = gasEstimate * BigInt(feePerUnitGas);
+    const gasPrice = (feeData.gasPrice || feeData.maxFeePerGas || 0n);
+
+    return {
+      gasEstimate: gasEstimate.toString(),
+      broadcasterFeeAmount: broadcasterFeeAmount.toString(),
+      gasPrice: gasPrice.toString(),
+    };
+  });
+
+  /**
+   * Generate a ZK proof for unshield via broadcaster (includes broadcaster fee commitment).
+   *
+   * params: {
+   *   chainName: string,
+   *   railgunWalletID: string,
+   *   encryptionKey: string,
+   *   publicWalletAddress: string,
+   *   amount: string,
+   *   broadcasterFeeTokenAddress: string,
+   *   broadcasterFeeAmount: string,
+   *   broadcasterRailgunAddress: string,
+   *   overallBatchMinGasPrice: string,
+   * }
+   */
+  registerMethod("generateBroadcasterUnshieldProof", async (params) => {
+    requireEngine();
+    const {
+      chainName, railgunWalletID, encryptionKey, publicWalletAddress, amount,
+      broadcasterFeeTokenAddress, broadcasterFeeAmount, broadcasterRailgunAddress,
+      overallBatchMinGasPrice,
+    } = params;
+    const { networkName } = chainForName(chainName);
+    const wrappedAddress = NETWORK_CONFIG[networkName].baseToken.wrappedAddress;
+    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
+
+    const wrappedERC20Amount = {
+      tokenAddress: wrappedAddress,
+      amount: BigInt(amount),
+    };
+
+    const broadcasterFeeERC20AmountRecipient = {
+      tokenAddress: broadcasterFeeTokenAddress,
+      amount: BigInt(broadcasterFeeAmount),
+      recipientAddress: broadcasterRailgunAddress,
+    };
+
+    await generateUnshieldBaseTokenProof(
+      txidVersion,
+      networkName,
+      publicWalletAddress,
+      railgunWalletID,
+      encryptionKey,
+      wrappedERC20Amount,
+      broadcasterFeeERC20AmountRecipient,
+      false, // sendWithPublicWallet — broadcaster pays
+      overallBatchMinGasPrice ? BigInt(overallBatchMinGasPrice) : undefined,
+      (progress, status) => {
+        sendEvent("proofProgress", { progress, status });
+      },
+    );
+
+    return { proved: true };
+  });
+
+  /**
+   * Populate a proved broadcaster unshield transaction.
+   * Returns nullifiers and POIs needed for broadcaster submission.
+   *
+   * params: {
+   *   chainName: string,
+   *   railgunWalletID: string,
+   *   publicWalletAddress: string,
+   *   amount: string,
+   *   broadcasterFeeTokenAddress: string,
+   *   broadcasterFeeAmount: string,
+   *   broadcasterRailgunAddress: string,
+   *   overallBatchMinGasPrice: string,
+   * }
+   */
+  registerMethod("populateBroadcasterUnshield", async (params) => {
+    requireEngine();
+    const {
+      chainName, railgunWalletID, publicWalletAddress, amount,
+      broadcasterFeeTokenAddress, broadcasterFeeAmount, broadcasterRailgunAddress,
+      overallBatchMinGasPrice,
+    } = params;
+    const { networkName } = chainForName(chainName);
+    const wrappedAddress = NETWORK_CONFIG[networkName].baseToken.wrappedAddress;
+    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
+
+    const wrappedERC20Amount = {
+      tokenAddress: wrappedAddress,
+      amount: BigInt(amount),
+    };
+
+    const broadcasterFeeERC20AmountRecipient = {
+      tokenAddress: broadcasterFeeTokenAddress,
+      amount: BigInt(broadcasterFeeAmount),
+      recipientAddress: broadcasterRailgunAddress,
+    };
+
+    const provider = getFallbackProviderForNetwork(networkName);
+    const feeData = await provider.getFeeData();
+
+    let gasDetails;
+    if (feeData.maxFeePerGas != null) {
+      gasDetails = {
+        evmGasType: 2,
+        gasEstimate: 1500000n,
+        maxFeePerGas: feeData.maxFeePerGas,
+        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? 1000000000n,
+      };
+    } else {
+      gasDetails = {
+        evmGasType: 1,
+        gasEstimate: 1500000n,
+        gasPrice: feeData.gasPrice ?? 1000000000n,
+      };
+    }
+
+    const result = await populateProvedUnshieldBaseToken(
+      txidVersion,
+      networkName,
+      publicWalletAddress,
+      railgunWalletID,
+      wrappedERC20Amount,
+      broadcasterFeeERC20AmountRecipient,
+      false, // sendWithPublicWallet
+      overallBatchMinGasPrice ? BigInt(overallBatchMinGasPrice) : undefined,
+      gasDetails,
+    );
+
+    return {
+      transaction: serializeTransaction(result.transaction),
+      nullifiers: result.nullifiers || [],
+      preTransactionPOIsPerTxidLeafPerList: result.preTransactionPOIsPerTxidLeafPerList,
+    };
   });
 }

@@ -16,9 +16,15 @@ struct Transaction: Codable, Identifiable, Sendable {
     let timestamp: Date
     let tokenSymbol: String
     let amount: String           // human-readable (e.g. "0.5")
-    let fromAccountID: String    // wallet account ID
+    let fromWalletID: String    // wallet ID
     let fromAddress: String      // public ETH address or railgun address
     let toAddress: String        // destination address
+
+    enum CodingKeys: String, CodingKey {
+        case id, action, chainName, txHash, timestamp, tokenSymbol, amount
+        case fromWalletID = "fromAccountID"
+        case fromAddress, toAddress
+    }
 
     enum Action: String, Codable, Sendable {
         case shield

@@ -1,13 +1,13 @@
 //
-//  Account.swift
+//  Wallet.swift
 //  railcart
 //
-//  A wallet account derived from the HD seed at a specific BIP-44 index.
+//  A wallet derived from the HD seed at a specific BIP-44 index.
 //
 
 import Foundation
 
-struct Account: Codable, Identifiable, Sendable {
+struct Wallet: Codable, Identifiable, Sendable {
     let id: String               // railgunWalletID from the SDK
     let derivationIndex: Int     // BIP-44 index (0, 1, 2, ...)
     let railgunAddress: String   // 0zk privacy address
@@ -24,16 +24,16 @@ struct Account: Codable, Identifiable, Sendable {
     private static let storageKey = "wallet.accounts"
     static var defaults: UserDefaults = .standard
 
-    static func loadAll() -> [Account] {
+    static func loadAll() -> [Wallet] {
         guard let data = defaults.data(forKey: storageKey),
-              let accounts = try? JSONDecoder().decode([Account].self, from: data) else {
+              let wallets = try? JSONDecoder().decode([Wallet].self, from: data) else {
             return []
         }
-        return accounts
+        return wallets
     }
 
-    static func saveAll(_ accounts: [Account]) {
-        if let data = try? JSONEncoder().encode(accounts) {
+    static func saveAll(_ wallets: [Wallet]) {
+        if let data = try? JSONEncoder().encode(wallets) {
             defaults.set(data, forKey: storageKey)
         }
     }

@@ -43,6 +43,8 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func fullRescan(chainName: String, walletIDs: [String]) async throws { fatalError() }
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance] { fatalError() }
+    func estimateBroadcasterFee(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, feePerUnitGas: String) async throws -> BroadcasterFeeEstimate { fatalError() }
+    func unshieldBaseTokenViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
     func loadChainProviderFromRemoteConfig(chainName: String) async throws { fatalError() }
 }
@@ -127,6 +129,19 @@ struct ERC20BalancesResponse: Decodable, Sendable {
     let balances: [TokenBalance]
 }
 
+struct BroadcasterFeeEstimate: Decodable, Sendable {
+    let gasEstimate: String
+    let broadcasterFeeAmount: String
+    let gasPrice: String
+}
+
+enum BroadcasterUnshieldStep: Sendable {
+    case estimatingGas
+    case generatingProof
+    case populatingTransaction
+    case submittingToBroadcaster
+}
+
 // MARK: - Protocol
 
 @MainActor
@@ -169,6 +184,20 @@ protocol WalletServiceProtocol: Sendable {
     func getPrivateBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
     func scanAndGetBalances(chainName: String, walletID: String) async throws -> [TokenBalance]
     func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance]
+
+    // Broadcaster unshield
+    func estimateBroadcasterFee(
+        chainName: String, walletID: String, encryptionKey: String,
+        toAddress: String, amount: String, feePerUnitGas: String
+    ) async throws -> BroadcasterFeeEstimate
+
+    func unshieldBaseTokenViaBroadcaster(
+        chainName: String, walletID: String, encryptionKey: String,
+        toAddress: String, amount: String, broadcaster: BroadcasterInfo,
+        feeEstimate: BroadcasterFeeEstimate,
+        onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String
 
     // Settings
     func loadChainProvider(chainName: String, providerUrl: String) async throws
@@ -458,5 +487,93 @@ final class LiveWalletService: WalletServiceProtocol {
         if let firstUrl = result.providerUrls?.first, let url = URL(string: firstUrl) {
             rpcClients[chainName] = RPCClient(url: url)
         }
+    }
+
+    // MARK: - Broadcaster Unshield
+
+    func estimateBroadcasterFee(
+        chainName: String, walletID: String, encryptionKey: String,
+        toAddress: String, amount: String, feePerUnitGas: String
+    ) async throws -> BroadcasterFeeEstimate {
+        try await bridge.call("gasEstimateForBroadcasterUnshield", params: [
+            "chainName": chainName,
+            "railgunWalletID": walletID,
+            "encryptionKey": encryptionKey,
+            "publicWalletAddress": toAddress,
+            "amount": amount,
+            "feePerUnitGas": feePerUnitGas,
+        ], as: BroadcasterFeeEstimate.self)
+    }
+
+    func unshieldBaseTokenViaBroadcaster(
+        chainName: String, walletID: String, encryptionKey: String,
+        toAddress: String, amount: String, broadcaster: BroadcasterInfo,
+        feeEstimate: BroadcasterFeeEstimate,
+        onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String {
+        // Listen for proof progress events
+        bridge.onEvent("proofProgress") { data in
+            if let dict = data as? [String: Any],
+               let progress = dict["progress"] as? Double {
+                onProofProgress(min(max(progress, 0), 1))
+            }
+        }
+
+        let wrappedAddress = Token.weth.address(on: Chain(rawValue: chainName) ?? .ethereum) ?? ""
+
+        // Step 1: Generate ZK proof with broadcaster fee
+        onStep(.generatingProof)
+        let _ = try await bridge.callRaw("generateBroadcasterUnshieldProof", params: [
+            "chainName": chainName,
+            "railgunWalletID": walletID,
+            "encryptionKey": encryptionKey,
+            "publicWalletAddress": toAddress,
+            "amount": amount,
+            "broadcasterFeeTokenAddress": wrappedAddress,
+            "broadcasterFeeAmount": feeEstimate.broadcasterFeeAmount,
+            "broadcasterRailgunAddress": broadcaster.railgunAddress,
+            "overallBatchMinGasPrice": feeEstimate.gasPrice,
+        ], timeout: .seconds(300))
+
+        // Step 2: Populate proved transaction
+        onStep(.populatingTransaction)
+        let populateResult = try await bridge.callRaw("populateBroadcasterUnshield", params: [
+            "chainName": chainName,
+            "railgunWalletID": walletID,
+            "publicWalletAddress": toAddress,
+            "amount": amount,
+            "broadcasterFeeTokenAddress": wrappedAddress,
+            "broadcasterFeeAmount": feeEstimate.broadcasterFeeAmount,
+            "broadcasterRailgunAddress": broadcaster.railgunAddress,
+            "overallBatchMinGasPrice": feeEstimate.gasPrice,
+        ])
+
+        guard let resultDict = populateResult as? [String: Any],
+              let txDict = resultDict["transaction"] as? [String: Any],
+              let to = txDict["to"] as? String,
+              let data = txDict["data"] as? String,
+              let nullifiers = resultDict["nullifiers"] as? [String],
+              let pois = resultDict["preTransactionPOIsPerTxidLeafPerList"]
+        else {
+            throw NodeBridgeError.decodingError("Failed to decode broadcaster populate response")
+        }
+
+        // Step 3: Submit to broadcaster via Waku
+        onStep(.submittingToBroadcaster)
+        struct SubmitResponse: Decodable { let txHash: String }
+        let submitResult = try await bridge.call("submitBroadcasterTransaction", params: [
+            "chainName": chainName,
+            "to": to,
+            "data": data,
+            "broadcasterRailgunAddress": broadcaster.railgunAddress,
+            "broadcasterFeesID": broadcaster.feesID,
+            "nullifiers": nullifiers,
+            "overallBatchMinGasPrice": feeEstimate.gasPrice,
+            "useRelayAdapt": true,
+            "preTransactionPOIsPerTxidLeafPerList": pois,
+        ] as [String: any Sendable], as: SubmitResponse.self, timeout: .seconds(120))
+
+        return submitResult.txHash
     }
 }

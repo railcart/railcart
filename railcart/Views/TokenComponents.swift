@@ -98,7 +98,7 @@ struct TokenRow: View {
                     .foregroundStyle(.primary)
                     .lineLimit(1)
                 if let action, actionState != .hidden {
-                    actionPill(action)
+                    actionPill(action, state: actionState, action: onAction)
                 }
             }
         }
@@ -108,14 +108,14 @@ struct TokenRow: View {
     }
 
     @ViewBuilder
-    private func actionPill(_ action: TokenCellAction) -> some View {
-        let enabled = actionState == .enabled
+    private func actionPill(_ cellAction: TokenCellAction, state: TokenActionState, action: (() -> Void)?) -> some View {
+        let enabled = state == .enabled
         Button {
-            onAction?()
+            action?()
         } label: {
             HStack(spacing: 4) {
-                Image(systemName: action.systemImage)
-                Text(action.label)
+                Image(systemName: cellAction.systemImage)
+                Text(cellAction.label)
             }
             .fixedSize()
             .font(.caption.bold())
@@ -134,11 +134,11 @@ struct TokenRow: View {
         }
         .buttonStyle(.plain)
         .disabled(!enabled)
-        .help(tooltip(for: action))
+        .help(tooltip(for: cellAction, state: state))
     }
 
-    private func tooltip(for action: TokenCellAction) -> String {
-        switch actionState {
+    private func tooltip(for action: TokenCellAction, state: TokenActionState) -> String {
+        switch state {
         case .enabled: action.label
         case .zeroBalance: "No \(token.symbol) to \(action.label.lowercased())"
         case .unsupported: "\(action.label) for \(token.symbol) coming soon"

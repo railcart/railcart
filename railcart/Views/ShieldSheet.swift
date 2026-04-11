@@ -15,8 +15,8 @@ struct ShieldSheet: View {
     @Environment(TransactionStore.self) private var transactionStore
 
     let token: Token
-    let account: Account
-    let unlocked: Account.Unlocked
+    let wallet: Wallet
+    let unlocked: Wallet.Unlocked
 
     @State private var amount = ""
     @State private var isWorking = false
@@ -32,7 +32,7 @@ struct ShieldSheet: View {
 
             Form {
                 LabeledContent("From") {
-                    Text(account.name).font(.body.bold())
+                    Text(wallet.name).font(.body.bold())
                 }
                 LabeledContent("Token") {
                     Text(token.symbol).font(.body.bold())
@@ -65,14 +65,23 @@ struct ShieldSheet: View {
             }
 
             HStack {
-                Spacer()
-                Button("Close") { dismiss() }
-                Button(buttonTitle) {
-                    Task { await shield() }
+                if resultTxHash == nil && !isWorking {
+                    Button("Cancel") { dismiss() }
+                        .keyboardShortcut(.cancelAction)
                 }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-                .disabled(amount.isEmpty || isWorking || resultTxHash != nil)
+                Spacer()
+                if resultTxHash != nil {
+                    Button("Done") { dismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                } else {
+                    Button(buttonTitle) {
+                        Task { await shield() }
+                    }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(amount.isEmpty || isWorking)
+                }
             }
         }
         .padding(20)
@@ -80,9 +89,7 @@ struct ShieldSheet: View {
     }
 
     private var buttonTitle: String {
-        if isWorking { return "Shielding..." }
-        if resultTxHash != nil { return "Done" }
-        return "Shield"
+        isWorking ? "Shielding..." : "Shield"
     }
 
     private var header: some View {
@@ -101,7 +108,7 @@ struct ShieldSheet: View {
     private func shield() async {
         let railgunAddress: String
         do {
-            railgunAddress = try await service.getRailgunAddress(walletID: account.id)
+            railgunAddress = try await service.getRailgunAddress(walletID: wallet.id)
         } catch {
             errorMessage = "Could not load RAILGUN address."
             return
@@ -134,13 +141,13 @@ struct ShieldSheet: View {
                 timestamp: Date(),
                 tokenSymbol: token.symbol,
                 amount: amount,
-                fromAccountID: account.id,
+                fromWalletID: wallet.id,
                 fromAddress: unlocked.ethAddress,
                 toAddress: railgunAddress
             ))
             let chain = network.selectedChain.rawValue
             balanceService?.invalidateEthBalance(chainName: chain, address: unlocked.ethAddress)
-            balanceService?.invalidatePrivateBalances(chainName: chain, walletID: account.id)
+            balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = nil

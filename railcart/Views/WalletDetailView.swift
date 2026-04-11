@@ -1,21 +1,21 @@
 //
-//  AccountDetailView.swift
+//  WalletDetailView.swift
 //  railcart
 //
-//  Detail view for a single wallet account.
+//  Detail view for a single wallet.
 //  Split into public address (top) and private zk address (bottom) sections.
 //
 
 import SwiftUI
 
-struct AccountDetailView: View {
+struct WalletDetailView: View {
     @Environment(\.balanceService) private var balanceService
     @Environment(\.walletService) private var walletService
     @Environment(WalletState.self) private var walletState
     @Environment(NetworkState.self) private var network
     @Environment(TransactionStore.self) private var transactionStore
 
-    let accountID: String
+    let walletID: String
 
     @State private var isEditingName = false
     @FocusState private var nameFieldFocused: Bool
@@ -31,25 +31,25 @@ struct AccountDetailView: View {
 
     // Private balances (read from BalanceService cache; scanning is centralized)
     private var privateTokenBalances: [TokenBalance] {
-        guard let account, let balanceService else { return [] }
+        guard let wallet, let balanceService else { return [] }
         return balanceService.cachedPrivateBalances(
-            chainName: network.selectedChain.rawValue, walletID: account.id
+            chainName: network.selectedChain.rawValue, walletID: wallet.id
         ) ?? []
     }
 
-    private var account: Account? {
-        walletState.account(byID: accountID)
+    private var wallet: Wallet? {
+        walletState.wallet(byID: walletID)
     }
 
-    private var unlocked: Account.Unlocked? {
-        walletState.unlockedKeys[accountID]
+    private var unlocked: Wallet.Unlocked? {
+        walletState.unlockedKeys[walletID]
     }
 
     var body: some View {
-        if let account, let unlocked {
-            accountView(account: account, unlocked: unlocked)
-        } else if account != nil, walletState.step != .ready {
-            // Account exists in persisted list but engine/wallet hasn't finished
+        if let wallet, let unlocked {
+            walletView(wallet: wallet, unlocked: unlocked)
+        } else if wallet != nil, walletState.step != .ready {
+            // Wallet exists in persisted list but engine/wallet hasn't finished
             // loading yet — show a progress state instead of a scary error.
             VStack(spacing: 12) {
                 ProgressView()
@@ -59,17 +59,17 @@ struct AccountDetailView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ContentUnavailableView(
-                "Account Not Found",
+                "Wallet Not Found",
                 systemImage: "exclamationmark.triangle",
-                description: Text("This account could not be loaded.")
+                description: Text("This wallet could not be loaded.")
             )
         }
     }
 
-    private func accountView(account: Account, unlocked: Account.Unlocked) -> some View {
+    private func walletView(wallet: Wallet, unlocked: Wallet.Unlocked) -> some View {
         ScrollView {
             VStack(spacing: 0) {
-                walletHeader(account: account)
+                walletHeader(wallet: wallet)
 
                 VStack(spacing: 20) {
                     PublicBalanceSection(
@@ -82,13 +82,13 @@ struct AccountDetailView: View {
                         onShield: { token in shieldToken = token }
                     )
 
-                    let pendingShields = pendingShieldTransactions(for: account)
+                    let pendingShields = pendingShieldTransactions(for: wallet)
                     if !pendingShields.isEmpty {
                         PendingShieldView(transactions: pendingShields)
                     }
 
                     PrivateBalanceSection(
-                        railgunAddress: account.railgunAddress,
+                        railgunAddress: wallet.railgunAddress,
                         tokenBalances: privateTokenBalances,
                         chain: network.selectedChain,
                         isScanning: balanceService?.isScanning ?? false,
@@ -116,23 +116,23 @@ struct AccountDetailView: View {
             }
         }
         .sheet(item: $shieldToken) { token in
-            ShieldSheet(token: token, account: account, unlocked: unlocked)
+            ShieldSheet(token: token, wallet: wallet, unlocked: unlocked)
         }
         .sheet(item: $unshieldToken) { token in
-            UnshieldSheet(token: token, account: account, unlocked: unlocked)
+            UnshieldSheet(token: token, wallet: wallet, unlocked: unlocked)
         }
     }
 
     // MARK: - Header
 
-    private func walletHeader(account: Account) -> some View {
+    private func walletHeader(wallet: Wallet) -> some View {
         HStack(spacing: 8) {
             if isEditingName {
                 let binding = Binding<String>(
-                    get: { account.name },
+                    get: { wallet.name },
                     set: { newName in
-                        if let idx = walletState.accounts.firstIndex(where: { $0.id == accountID }) {
-                            walletState.accounts[idx].name = newName
+                        if let idx = walletState.wallets.firstIndex(where: { $0.id == walletID }) {
+                            walletState.wallets[idx].name = newName
                         }
                     }
                 )
@@ -145,7 +145,7 @@ struct AccountDetailView: View {
                         if !nameFieldFocused { isEditingName = false }
                     }
             } else {
-                Text(account.name)
+                Text(wallet.name)
                     .font(.title2.bold())
                 Button {
                     isEditingName = true
@@ -208,17 +208,17 @@ struct AccountDetailView: View {
         guard let balanceService else { return }
         let chain = network.selectedChain.rawValue
         balanceService.invalidateAllPrivateBalances(chainName: chain)
-        let walletIDs = walletState.accounts.map(\.id)
+        let walletIDs = walletState.wallets.map(\.id)
         await balanceService.scanAllPrivateBalances(chainName: chain, walletIDs: walletIDs)
     }
 
-    /// Shield transactions from this account on the current chain within the last hour.
-    private func pendingShieldTransactions(for account: Account) -> [Transaction] {
+    /// Shield transactions from this wallet on the current chain within the last hour.
+    private func pendingShieldTransactions(for wallet: Wallet) -> [Transaction] {
         let cutoff = Date().addingTimeInterval(-3600)
         return transactionStore.transactions.filter { tx in
             tx.action == .shield
                 && tx.chainName == network.selectedChain.rawValue
-                && tx.fromAccountID == account.id
+                && tx.fromWalletID == wallet.id
                 && tx.timestamp > cutoff
         }
     }
@@ -226,18 +226,18 @@ struct AccountDetailView: View {
 
 // MARK: - Preview
 
-#Preview("Account Detail") {
+#Preview("Wallet Detail") {
     @Previewable @State var walletState = {
         let state = WalletState()
-        state.setAccountsForPreview([
-            Account(
+        state.setWalletsForPreview([
+            Wallet(
                 id: "preview-wallet-id",
                 derivationIndex: 0,
                 railgunAddress: "0zk1qy0v9cdm2pjash8wnfrz7xq5az62a3rjq7m4c9kfkxwcegrcc5t6rcpxgy08",
                 name: "Preview Wallet"
             )
         ])
-        state.unlockedKeys["preview-wallet-id"] = Account.Unlocked(
+        state.unlockedKeys["preview-wallet-id"] = Wallet.Unlocked(
             ethAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
             ethPrivateKey: ""
         )
@@ -256,7 +256,7 @@ struct AccountDetailView: View {
                 timestamp: Date().addingTimeInterval(-185),
                 tokenSymbol: "ETH",
                 amount: "0.5",
-                fromAccountID: "preview-wallet-id",
+                fromWalletID: "preview-wallet-id",
                 fromAddress: "0x742d35Cc6634C0532925a3b844Bc9e7595f2bD18",
                 toAddress: "0zk1qy0v9cdm2pjash8wnfrz7xq5az62a3rjq7m4c9kfkxwcegrcc5t6rcpxgy08"
             )
@@ -266,7 +266,7 @@ struct AccountDetailView: View {
 
     let mockService = MockWalletService()
 
-    AccountDetailView(accountID: "preview-wallet-id")
+    WalletDetailView(walletID: "preview-wallet-id")
         .environment(walletState)
         .environment(NetworkState())
         .environment(txStore)

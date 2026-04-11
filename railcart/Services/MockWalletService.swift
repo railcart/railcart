@@ -71,6 +71,11 @@ struct MockWalletService: WalletServiceProtocol {
         }
     }
 
+    func estimateBroadcasterFee(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, feePerUnitGas: String) async throws -> BroadcasterFeeEstimate {
+        BroadcasterFeeEstimate(gasEstimate: "1500000", broadcasterFeeAmount: "150000000000000", gasPrice: "30000000000")
+    }
+    func unshieldBaseTokenViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+
     func loadChainProvider(chainName: String, providerUrl: String) async throws {}
     func loadChainProviderFromRemoteConfig(chainName: String) async throws {}
 }

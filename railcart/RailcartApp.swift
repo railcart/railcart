@@ -26,7 +26,7 @@ struct RailcartApp: App {
             KeychainHelper.biometryDisabled = true
             let testDefaults = UserDefaults(suiteName: "app.railcart.macos.uitesting")!
             testDefaults.removePersistentDomain(forName: "app.railcart.macos.uitesting")
-            Account.defaults = testDefaults
+            Wallet.defaults = testDefaults
             KeychainHelper.delete(.walletID)
             KeychainHelper.delete(.walletSalt)
             KeychainHelper.delete(.encryptionKey)

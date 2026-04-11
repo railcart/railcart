@@ -3,7 +3,7 @@
 //  railcart
 //
 //  DEBUG-only: replace the primary mnemonic with a user-supplied one,
-//  reset the account list to a single derived wallet, and refresh balances.
+//  reset the wallet list to a single derived wallet, and refresh balances.
 //
 
 #if DEBUG
@@ -41,7 +41,7 @@ struct ReplaceCoreMnemonicView: View {
             Text("Replace Core Mnemonic")
                 .font(.title2.bold())
 
-            Text("DEBUG: replaces the primary mnemonic and resets accounts to a single derived wallet.")
+            Text("DEBUG: replaces the primary mnemonic and resets wallets to a single derived wallet.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -120,20 +120,20 @@ struct ReplaceCoreMnemonicView: View {
 
             try KeychainHelper.save(.walletID, value: walletInfo.id)
 
-            let account = Account(
+            let newWallet = Wallet(
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
                 name: "Wallet 1"
             )
-            let unlocked = Account.Unlocked(
+            let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,
                 ethPrivateKey: walletInfo.ethPrivateKey
             )
 
             walletState.unlockedKeys.removeAll()
-            walletState.accounts = [account]
-            walletState.unlockedKeys[account.id] = unlocked
+            walletState.wallets = [newWallet]
+            walletState.unlockedKeys[newWallet.id] = unlocked
 
             dismiss()
 
@@ -142,7 +142,7 @@ struct ReplaceCoreMnemonicView: View {
                 try? await network.ensureProviderLoaded(for: chain, using: service)
                 await balanceService.scanAllPrivateBalances(
                     chainName: chain.rawValue,
-                    walletIDs: [account.id]
+                    walletIDs: [newWallet.id]
                 )
             }
         } catch {

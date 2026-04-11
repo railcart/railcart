@@ -132,20 +132,20 @@ struct ImportWalletView: View {
                 creationBlockNumbers: [:]
             )
 
-            let importCount = walletState.accounts.filter { $0.name.hasPrefix("Imported Wallet") }.count
+            let importCount = walletState.wallets.filter { $0.name.hasPrefix("Imported Wallet") }.count
             let name = importCount == 0 ? "Imported Wallet" : "Imported Wallet \(importCount + 1)"
 
-            let account = Account(
+            let newWallet = Wallet(
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
                 name: name
             )
-            let unlocked = Account.Unlocked(
+            let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,
                 ethPrivateKey: walletInfo.ethPrivateKey
             )
-            walletState.addAccount(account, unlocked: unlocked)
+            walletState.addWallet(newWallet, unlocked: unlocked)
             dismiss()
         } catch {
             errorMessage = "Import failed: \(error.localizedDescription)"

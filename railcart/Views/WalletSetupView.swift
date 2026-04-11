@@ -33,7 +33,7 @@ struct WalletSetupView: View {
                 unlockWalletView
 
             case .ready:
-                // Shouldn't be shown standalone — AccountDetailView handles this
+                // Shouldn't be shown standalone — WalletDetailView handles this
                 Text("Wallet unlocked")
             }
 
@@ -175,22 +175,22 @@ struct WalletSetupView: View {
     // MARK: - Actions
 
     private func checkExistingWallet() {
-        if wallet.accounts.isEmpty && KeychainHelper.hasKey(.walletID) {
-            // Account list was lost (e.g. UserDefaults cleared) but Keychain still has
-            // the wallet ID. Reconstruct a placeholder account so the unlock flow can
+        if wallet.wallets.isEmpty && KeychainHelper.hasKey(.walletID) {
+            // Wallet list was lost (e.g. UserDefaults cleared) but Keychain still has
+            // the wallet ID. Reconstruct a placeholder wallet so the unlock flow can
             // load it from the RAILGUN SDK.
             if let walletID = KeychainHelper.load(.walletID) {
-                let recovered = Account(
+                let recovered = Wallet(
                     id: walletID,
                     derivationIndex: 0,
                     railgunAddress: "",
                     name: "Wallet 1"
                 )
-                wallet.accounts = [recovered]
+                wallet.wallets = [recovered]
             }
         }
 
-        if wallet.accounts.isEmpty {
+        if wallet.wallets.isEmpty {
             wallet.setStep(.enterPassword)
         } else {
             wallet.setStep(.unlock)
@@ -232,17 +232,17 @@ struct WalletSetupView: View {
             try KeychainHelper.save(.walletSalt, value: salt)
             try? KeychainHelper.save(.encryptionKey, value: encryptionKey)
 
-            let account = Account(
+            let newWallet = Wallet(
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
                 name: "Wallet 1"
             )
-            let unlocked = Account.Unlocked(
+            let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,
                 ethPrivateKey: walletInfo.ethPrivateKey
             )
-            wallet.addAccount(account, unlocked: unlocked)
+            wallet.addWallet(newWallet, unlocked: unlocked)
             wallet.mnemonic = nil
             password = ""
             confirmPassword = ""
@@ -260,7 +260,7 @@ struct WalletSetupView: View {
         )
         guard authenticated else { return }
 
-        await loadAllAccounts(encryptionKey: encryptionKey)
+        await loadAllWallets(encryptionKey: encryptionKey)
     }
 
     private func unlockWallets() async {
@@ -277,60 +277,60 @@ struct WalletSetupView: View {
         do {
             let encryptionKey = try await service.deriveEncryptionKey(password: password, salt: storedSalt)
             try? KeychainHelper.save(.encryptionKey, value: encryptionKey)
-            await loadAllAccounts(encryptionKey: encryptionKey)
+            await loadAllWallets(encryptionKey: encryptionKey)
             password = ""
         } catch {
             errorMessage = "Failed to unlock: \(error.localizedDescription)"
         }
     }
 
-    /// Load all persisted accounts from the SDK using the encryption key.
-    private func loadAllAccounts(encryptionKey: String) async {
+    /// Load all persisted wallets from the SDK using the encryption key.
+    private func loadAllWallets(encryptionKey: String) async {
         isWorking = true
         defer { isWorking = false }
 
         var unlockedCount = 0
         var failures: [String] = []
 
-        for (index, account) in wallet.accounts.enumerated() {
+        for (index, entry) in wallet.wallets.enumerated() {
             do {
                 let walletInfo = try await service.loadWallet(
                     encryptionKey: encryptionKey,
-                    walletID: account.id,
-                    derivationIndex: account.derivationIndex
+                    walletID: entry.id,
+                    derivationIndex: entry.derivationIndex
                 )
                 // Backfill railgunAddress if it was lost (e.g. recovered from Keychain)
-                if account.railgunAddress.isEmpty {
-                    wallet.accounts[index] = Account(
-                        id: account.id,
-                        derivationIndex: account.derivationIndex,
+                if entry.railgunAddress.isEmpty {
+                    wallet.wallets[index] = Wallet(
+                        id: entry.id,
+                        derivationIndex: entry.derivationIndex,
                         railgunAddress: walletInfo.railgunAddress,
-                        name: account.name
+                        name: entry.name
                     )
                 }
-                wallet.unlockAccount(account, with: Account.Unlocked(
+                wallet.unlockWallet(entry, with: Wallet.Unlocked(
                     ethAddress: walletInfo.ethAddress,
                     ethPrivateKey: walletInfo.ethPrivateKey
                 ))
                 unlockedCount += 1
             } catch {
-                let detail = "\(account.name) (\(account.id.prefix(8))…): \(error.localizedDescription)"
+                let detail = "\(entry.name) (\(entry.id.prefix(8))…): \(error.localizedDescription)"
                 failures.append(detail)
                 AppLogger.shared.log("wallet", "loadWallet failed for \(detail)")
             }
         }
 
-        if unlockedCount == 0 && !wallet.accounts.isEmpty {
-            // Every account failed — keep the user on the unlock screen with
+        if unlockedCount == 0 && !wallet.wallets.isEmpty {
+            // Every wallet failed — keep the user on the unlock screen with
             // a real error message instead of dropping them into a half-broken
             // ready state where the sidebar lists wallets but every detail
-            // page says "Account Not Found".
-            errorMessage = "Failed to unlock any account:\n" + failures.joined(separator: "\n")
+            // page says "Wallet Not Found".
+            errorMessage = "Failed to unlock any wallet:\n" + failures.joined(separator: "\n")
             return
         }
 
         if !failures.isEmpty {
-            errorMessage = "Some accounts failed to unlock:\n" + failures.joined(separator: "\n")
+            errorMessage = "Some wallets failed to unlock:\n" + failures.joined(separator: "\n")
         }
         wallet.setStep(.ready)
     }

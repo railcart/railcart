@@ -38,13 +38,13 @@ enum LockTimeout: String, CaseIterable, Identifiable {
     private static let defaultsKey = "lockTimeout"
 
     static var saved: LockTimeout {
-        guard let raw = Account.defaults.string(forKey: defaultsKey),
+        guard let raw = Wallet.defaults.string(forKey: defaultsKey),
               let value = LockTimeout(rawValue: raw) else { return .fiveMinutes }
         return value
     }
 
     static func save(_ value: LockTimeout) {
-        Account.defaults.set(value.rawValue, forKey: defaultsKey)
+        Wallet.defaults.set(value.rawValue, forKey: defaultsKey)
     }
 }
 
@@ -61,15 +61,15 @@ final class WalletState {
 
     private(set) var step: Step = .initial
 
-    /// Persisted account metadata (names, IDs, indices, railgun addresses).
-    var accounts: [Account] = Account.loadAll() {
-        didSet { if !isPreview { Account.saveAll(accounts) } }
+    /// Persisted wallet metadata (names, IDs, indices, railgun addresses).
+    var wallets: [Wallet] = Wallet.loadAll() {
+        didSet { if !isPreview { Wallet.saveAll(wallets) } }
     }
 
-    /// In-memory unlocked keys, keyed by account ID. Cleared on lock.
-    var unlockedKeys: [String: Account.Unlocked] = [:]
+    /// In-memory unlocked keys, keyed by wallet ID. Cleared on lock.
+    var unlockedKeys: [String: Wallet.Unlocked] = [:]
 
-    /// Shared wallet state (same across all accounts from same seed).
+    /// Shared wallet state (same across all wallets from same seed).
     var mnemonic: String?
 
     var lockTimeout: LockTimeout = .saved {
@@ -89,9 +89,9 @@ final class WalletState {
     private var lockPending = false
     private var isPreview = false
 
-    /// The next derivation index to use when adding a new account.
+    /// The next derivation index to use when adding a new wallet.
     var nextDerivationIndex: Int {
-        (accounts.map(\.derivationIndex).max() ?? -1) + 1
+        (wallets.map(\.derivationIndex).max() ?? -1) + 1
     }
 
     func setStep(_ newStep: Step) {
@@ -108,28 +108,28 @@ final class WalletState {
         step = .unlock
     }
 
-    func addAccount(_ account: Account, unlocked: Account.Unlocked) {
-        accounts.append(account)
-        unlockedKeys[account.id] = unlocked
+    func addWallet(_ wallet: Wallet, unlocked: Wallet.Unlocked) {
+        wallets.append(wallet)
+        unlockedKeys[wallet.id] = unlocked
     }
 
-    func unlockAccount(_ account: Account, with keys: Account.Unlocked) {
-        unlockedKeys[account.id] = keys
+    func unlockWallet(_ wallet: Wallet, with keys: Wallet.Unlocked) {
+        unlockedKeys[wallet.id] = keys
     }
 
-    func account(byID id: String) -> Account? {
-        accounts.first { $0.id == id }
+    func wallet(byID id: String) -> Wallet? {
+        wallets.first { $0.id == id }
     }
 
-    /// Set accounts without triggering UserDefaults persistence. For previews only.
-    func setAccountsForPreview(_ newAccounts: [Account]) {
+    /// Set wallets without triggering UserDefaults persistence. For previews only.
+    func setWalletsForPreview(_ newWallets: [Wallet]) {
         isPreview = true
-        accounts = newAccounts
+        wallets = newWallets
     }
 
     func addWallet(using service: any WalletServiceProtocol) async {
         guard let encryptionKey = KeychainHelper.load(.encryptionKey),
-              let firstAccount = accounts.first else { return }
+              let firstWallet = wallets.first else { return }
 
         isAddingWallet = true
         defer { isAddingWallet = false }
@@ -139,7 +139,7 @@ final class WalletState {
         do {
             let mnemonic = try await service.getWalletMnemonic(
                 encryptionKey: encryptionKey,
-                walletID: firstAccount.id
+                walletID: firstWallet.id
             )
 
             var creationBlocks: [String: Int] = [:]
@@ -156,17 +156,17 @@ final class WalletState {
                 creationBlockNumbers: creationBlocks
             )
 
-            let account = Account(
+            let newWallet = Wallet(
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
                 name: "Wallet \(index + 1)"
             )
-            let unlocked = Account.Unlocked(
+            let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,
                 ethPrivateKey: walletInfo.ethPrivateKey
             )
-            addAccount(account, unlocked: unlocked)
+            addWallet(newWallet, unlocked: unlocked)
         } catch {
             // TODO: surface error to user
         }

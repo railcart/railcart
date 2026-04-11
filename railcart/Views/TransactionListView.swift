@@ -43,7 +43,7 @@ struct TransactionListView: View {
                 List(filtered) { tx in
                     TransactionRow(
                         transaction: tx,
-                        accountName: walletState.account(byID: tx.fromAccountID)?.name
+                        walletName: walletState.wallet(byID: tx.fromWalletID)?.name
                     )
                 }
             }
@@ -56,7 +56,7 @@ struct TransactionListView: View {
 
 struct TransactionRow: View {
     let transaction: Transaction
-    let accountName: String?
+    let walletName: String?
 
     private var actionColor: Color {
         switch transaction.action {
@@ -120,8 +120,8 @@ struct TransactionRow: View {
                     Text(actionLabel)
                         .font(.body.bold())
                         .foregroundStyle(actionColor)
-                    if let accountName {
-                        Text("from \(accountName)")
+                    if let walletName {
+                        Text("from \(walletName)")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

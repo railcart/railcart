@@ -1,6 +1,7 @@
 import { registerMethod, sendEvent } from "./bridge.js";
 import { CHAINS, chainForName } from "./chains.js";
-import { WakuBroadcasterClient } from "@railgun-community/waku-broadcaster-client-node";
+import { WakuBroadcasterClient, BroadcasterTransaction } from "@railgun-community/waku-broadcaster-client-node";
+import { TXIDVersion } from "@railgun-community/shared-models";
 
 // Well-known trusted fee signer for production broadcasters
 const TRUSTED_FEE_SIGNER =
@@ -107,5 +108,53 @@ export function registerBroadcasterMethods() {
         chainId: entry.chain.id,
       })),
     };
+  });
+
+  /**
+   * Submit a proved transaction to a broadcaster via Waku P2P.
+   *
+   * params: {
+   *   chainName: string,
+   *   to: string,
+   *   data: string,
+   *   broadcasterRailgunAddress: string,
+   *   broadcasterFeesID: string,
+   *   nullifiers: string[],
+   *   overallBatchMinGasPrice: string,
+   *   useRelayAdapt?: boolean,
+   *   preTransactionPOIsPerTxidLeafPerList: object,
+   * }
+   */
+  registerMethod("submitBroadcasterTransaction", async (params) => {
+    const {
+      chainName, to, data,
+      broadcasterRailgunAddress, broadcasterFeesID,
+      nullifiers, overallBatchMinGasPrice,
+      useRelayAdapt,
+      preTransactionPOIsPerTxidLeafPerList,
+    } = params;
+
+    if (!WakuBroadcasterClient.isStarted()) {
+      throw new Error("Broadcaster search not started. Call startBroadcasterSearch first.");
+    }
+
+    const entry = chainForName(chainName);
+    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
+
+    const broadcasterTx = await BroadcasterTransaction.create(
+      txidVersion,
+      to,
+      data,
+      broadcasterRailgunAddress,
+      broadcasterFeesID,
+      entry.chain,
+      nullifiers,
+      BigInt(overallBatchMinGasPrice),
+      useRelayAdapt ?? true,
+      preTransactionPOIsPerTxidLeafPerList,
+    );
+
+    const txHash = await broadcasterTx.send();
+    return { txHash };
   });
 }
