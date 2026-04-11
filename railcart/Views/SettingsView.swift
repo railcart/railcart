@@ -9,6 +9,7 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(NetworkState.self) private var network
+    @Environment(WalletState.self) private var walletState
     @Environment(\.walletService) private var service
 
     @State private var rpcURLs: [Chain: String] = [:]
@@ -26,6 +27,22 @@ struct SettingsView: View {
                 .padding(.vertical, 16)
 
                 VStack(spacing: 20) {
+                    BalanceCard {
+                        @Bindable var walletState = walletState
+                        HStack {
+                            Label("Security", systemImage: "lock")
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                        }
+                        Picker("Auto-lock after", selection: $walletState.lockTimeout) {
+                            ForEach(LockTimeout.allCases) { timeout in
+                                Text(timeout.displayName).tag(timeout)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+
                     BalanceCard {
                         HStack {
                             Label("Custom RPC Providers", systemImage: "network")

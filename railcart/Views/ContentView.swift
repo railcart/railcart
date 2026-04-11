@@ -157,6 +157,9 @@ struct ContentView: View {
                 .interactiveDismissDisabled()
         }
         .task { listenForScanEvents() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            walletState.handleAppActivation()
+        }
         .onChange(of: walletState.step) {
             if walletState.step == .ready {
                 Task { await syncPrivateBalances() }
