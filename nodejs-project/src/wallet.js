@@ -1,6 +1,6 @@
 import { registerMethod, sendEvent } from "./bridge.js";
 import { chainForName, CHAINS } from "./chains.js";
-import { isEngineInitialized } from "./engine-init.js";
+import { isEngineInitialized, tryRotateProvider } from "./engine-init.js";
 import {
   createRailgunWallet,
   loadWalletByID,
@@ -27,6 +27,52 @@ import { Wallet as EthersWallet, HDNodeWallet, Mnemonic } from "ethers";
 function requireEngine() {
   if (!isEngineInitialized()) {
     throw new Error("Engine not initialized. Call initEngine first.");
+  }
+}
+
+/**
+ * Detect whether an error looks like an RPC/provider connectivity failure
+ * (as opposed to a logic error like "wallet not found").
+ */
+function isProviderError(err) {
+  const msg = (err?.message || "").toLowerCase();
+  return (
+    msg.includes("could not detect network") ||
+    msg.includes("failed to detect network") ||
+    msg.includes("network error") ||
+    msg.includes("timeout") ||
+    msg.includes("econnrefused") ||
+    msg.includes("enotfound") ||
+    msg.includes("econnreset") ||
+    msg.includes("socket hang up") ||
+    msg.includes("fetch failed") ||
+    msg.includes("bad response") ||
+    msg.includes("missing response") ||
+    msg.includes("server error") ||
+    msg.includes("502") ||
+    msg.includes("503") ||
+    msg.includes("429") ||
+    err?.code === "NETWORK_ERROR" ||
+    err?.code === "TIMEOUT" ||
+    err?.code === "SERVER_ERROR"
+  );
+}
+
+/**
+ * Run an async function; if it fails with a provider error, rotate to the
+ * next available RPC for the given chain and retry once.
+ */
+async function withProviderRetry(chainName, fn) {
+  try {
+    return await fn();
+  } catch (err) {
+    if (!isProviderError(err)) throw err;
+    process.stderr.write(
+      `[sync] Provider error for ${chainName}, attempting rotation: ${err?.message || err}\n`
+    );
+    const rotated = await tryRotateProvider(chainName);
+    if (!rotated) throw err;
+    return await fn();
   }
 }
 
@@ -259,7 +305,9 @@ export function registerWalletMethods() {
     const startTime = Date.now();
 
     try {
-      await refreshBalances(chain, walletFilter);
+      await withProviderRetry(chainName, () =>
+        refreshBalances(chain, walletFilter)
+      );
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       process.stderr.write(`[sync] Incremental refresh complete for ${chainName} in ${elapsed}s\n`);
     } catch (err) {
@@ -282,7 +330,9 @@ export function registerWalletMethods() {
     const startTime = Date.now();
 
     try {
-      await rescanFullUTXOMerkletreesAndWallets(chain, walletFilter);
+      await withProviderRetry(chainName, () =>
+        rescanFullUTXOMerkletreesAndWallets(chain, walletFilter)
+      );
       const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
       process.stderr.write(`[sync] Full rescan complete for ${chainName} in ${elapsed}s\n`);
     } catch (err) {
@@ -291,7 +341,9 @@ export function registerWalletMethods() {
       // Fall back to incremental refresh
       process.stderr.write(`[sync] Falling back to refreshBalances for ${chainName}\n`);
       try {
-        await refreshBalances(chain, walletFilter);
+        await withProviderRetry(chainName, () =>
+          refreshBalances(chain, walletFilter)
+        );
         const elapsed2 = ((Date.now() - startTime) / 1000).toFixed(1);
         process.stderr.write(`[sync] refreshBalances complete for ${chainName} in ${elapsed2}s\n`);
       } catch (refreshErr) {
@@ -311,9 +363,11 @@ export function registerWalletMethods() {
     requireEngine();
     const { chainName } = params;
     const { networkName } = chainForName(chainName);
-    const provider = getFallbackProviderForNetwork(networkName);
-    const feeData = await provider.getFeeData();
-    return { gasPrice: (feeData.gasPrice || 0n).toString() };
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const feeData = await provider.getFeeData();
+      return { gasPrice: (feeData.gasPrice || 0n).toString() };
+    });
   });
 
   /**
@@ -325,9 +379,11 @@ export function registerWalletMethods() {
     requireEngine();
     const { chainName, address } = params;
     const { networkName } = chainForName(chainName);
-    const provider = getFallbackProviderForNetwork(networkName);
-    const balance = await provider.getBalance(address);
-    return { balance: balance.toString(), address };
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const balance = await provider.getBalance(address);
+      return { balance: balance.toString(), address };
+    });
   });
 
   /**
@@ -339,9 +395,11 @@ export function registerWalletMethods() {
     requireEngine();
     const { chainName } = params;
     const { networkName } = chainForName(chainName);
-    const provider = getFallbackProviderForNetwork(networkName);
-    const blockNumber = await provider.getBlockNumber();
-    return { blockNumber, chainName };
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const blockNumber = await provider.getBlockNumber();
+      return { blockNumber, chainName };
+    });
   });
 
   /**
@@ -356,23 +414,25 @@ export function registerWalletMethods() {
       throw new Error("address and tokenAddresses are required");
     }
     const { networkName } = chainForName(chainName);
-    const provider = getFallbackProviderForNetwork(networkName);
-    const balanceOfSelector = "0x70a08231";
-    const balances = await Promise.all(
-      tokenAddresses.map(async (tokenAddress) => {
-        try {
-          const paddedAddress = "0x" + address.slice(2).padStart(64, "0");
-          const result = await provider.call({
-            to: tokenAddress,
-            data: balanceOfSelector + paddedAddress.slice(2),
-          });
-          return { tokenAddress, amount: BigInt(result).toString() };
-        } catch {
-          return { tokenAddress, amount: "0" };
-        }
-      })
-    );
-    return { balances };
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const balanceOfSelector = "0x70a08231";
+      const balances = await Promise.all(
+        tokenAddresses.map(async (tokenAddress) => {
+          try {
+            const paddedAddress = "0x" + address.slice(2).padStart(64, "0");
+            const result = await provider.call({
+              to: tokenAddress,
+              data: balanceOfSelector + paddedAddress.slice(2),
+            });
+            return { tokenAddress, amount: BigInt(result).toString() };
+          } catch {
+            return { tokenAddress, amount: "0" };
+          }
+        })
+      );
+      return { balances };
+    });
   });
 
   /**
@@ -479,6 +539,7 @@ export function registerWalletMethods() {
     };
 
     // Fetch current fee data to determine gas type
+    return withProviderRetry(chainName, async () => {
     const provider = getFallbackProviderForNetwork(networkName);
     const feeData = await provider.getFeeData();
 
@@ -513,6 +574,7 @@ export function registerWalletMethods() {
     );
 
     return { transaction: serializeTransaction(result.transaction) };
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -543,6 +605,7 @@ export function registerWalletMethods() {
       amount: BigInt(amount),
     };
 
+    return withProviderRetry(chainName, async () => {
     const provider = getFallbackProviderForNetwork(networkName);
     const feeData = await provider.getFeeData();
 
@@ -588,6 +651,7 @@ export function registerWalletMethods() {
       broadcasterFeeAmount: broadcasterFeeAmount.toString(),
       gasPrice: gasPrice.toString(),
     };
+    });
   });
 
   /**
@@ -682,6 +746,7 @@ export function registerWalletMethods() {
       recipientAddress: broadcasterRailgunAddress,
     };
 
+    return withProviderRetry(chainName, async () => {
     const provider = getFallbackProviderForNetwork(networkName);
     const feeData = await provider.getFeeData();
 
@@ -718,5 +783,6 @@ export function registerWalletMethods() {
       nullifiers: result.nullifiers || [],
       preTransactionPOIsPerTxidLeafPerList: result.preTransactionPOIsPerTxidLeafPerList,
     };
+    });
   });
 }

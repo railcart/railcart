@@ -4,6 +4,7 @@ import {
   startRailgunEngine,
   getProver,
   loadProvider,
+  getFallbackProviderForNetwork,
   setOnUTXOMerkletreeScanCallback,
   setOnTXIDMerkletreeScanCallback,
 } from "@railgun-community/wallet";
@@ -14,6 +15,62 @@ import path from "path";
 import { loadRemoteConfig, getCachedRemoteConfig } from "./remote-config.js";
 
 let engineInitialized = false;
+
+// Per-chain provider state for rotation/retry.
+// candidates: all available providers (from remote config or custom)
+// currentIndex: which candidate is currently loaded
+const chainProviderState = {};
+
+/**
+ * Health-check a loaded provider by making a real RPC call.
+ * Returns true if the provider responds within a timeout.
+ */
+async function healthCheckProvider(networkName) {
+  const provider = getFallbackProviderForNetwork(networkName);
+  const timeout = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error("Health check timed out")), 10000)
+  );
+  await Promise.race([provider.getBlockNumber(), timeout]);
+}
+
+/**
+ * Try to rotate to the next available provider for a chain.
+ * Returns true if a working provider was found, false if all exhausted.
+ */
+export async function tryRotateProvider(chainName) {
+  const state = chainProviderState[chainName];
+  if (!state || state.candidates.length <= 1) return false;
+
+  const { networkName, chain } = chainForName(chainName);
+  const startIndex = state.currentIndex;
+
+  for (let i = 1; i < state.candidates.length; i++) {
+    const idx = (startIndex + i) % state.candidates.length;
+    const candidate = state.candidates[idx];
+    try {
+      const providerConfig = { chainId: chain.id, providers: [candidate] };
+      await loadProvider(providerConfig, networkName);
+      await healthCheckProvider(networkName);
+      state.currentIndex = idx;
+      process.stderr.write(
+        `[sync] Rotated provider for ${chainName}: ${candidate.provider}\n`
+      );
+      sendEvent("providerRotated", {
+        chainName,
+        providerUrl: candidate.provider,
+      });
+      return true;
+    } catch (err) {
+      process.stderr.write(
+        `[sync] Rotation candidate ${candidate.provider} failed for ${chainName}: ${err?.message || err}\n`
+      );
+    }
+  }
+  process.stderr.write(
+    `[sync] All ${state.candidates.length} providers exhausted for ${chainName}\n`
+  );
+  return false;
+}
 
 function getDataDir() {
   const home = process.env.HOME || process.env.USERPROFILE || "/tmp";
@@ -168,18 +225,30 @@ export function registerEngineInitMethods() {
 
     const { networkName, chain } = chainForName(chainName);
 
+    const candidate = { provider: providerUrl, priority: 1, weight: 2 };
     const providerConfig = {
       chainId: chain.id,
-      providers: [
-        {
-          provider: providerUrl,
-          priority: 1,
-          weight: 2,
-        },
-      ],
+      providers: [candidate],
     };
 
     await loadProvider(providerConfig, networkName);
+
+    // Verify the provider actually responds to RPC calls.
+    try {
+      await healthCheckProvider(networkName);
+    } catch (err) {
+      throw new Error(
+        `Provider ${providerUrl} loaded but failed health check: ${err?.message || err}`
+      );
+    }
+
+    // Store as the sole candidate (custom URL overrides remote config list).
+    chainProviderState[chainName] = {
+      candidates: [candidate],
+      currentIndex: 0,
+      networkName,
+    };
+
     process.stderr.write(`[sync] Loaded provider for ${chainName} (${networkName})\n`);
     return { chainName, loaded: true };
   });
@@ -224,13 +293,24 @@ export function registerEngineInitMethods() {
       throw new Error(`Remote config providers for ${chainName} were unparseable`);
     }
 
-    // Shuffle and try each provider individually until one loads successfully.
-    // Avoids FallbackProvider quorum issues while still providing resilience.
+    // Shuffle and try each provider individually until one passes a real
+    // health check (getBlockNumber). Store all candidates for later rotation
+    // if the chosen provider degrades mid-session.
     const shuffled = allProviders.sort(() => Math.random() - 0.5);
-    for (const candidate of shuffled) {
+    for (let i = 0; i < shuffled.length; i++) {
+      const candidate = shuffled[i];
       try {
         const providerConfig = { chainId: chain.id, providers: [candidate] };
         await loadProvider(providerConfig, networkName);
+        await healthCheckProvider(networkName);
+
+        // Store the full shuffled list so rotation can try the rest.
+        chainProviderState[chainName] = {
+          candidates: shuffled,
+          currentIndex: i,
+          networkName,
+        };
+
         process.stderr.write(`[sync] Loaded provider from remote config for ${chainName} (${networkName}): ${candidate.provider}\n`);
         return { chainName, loaded: true, providerCount: 1, providerUrls: [candidate.provider] };
       } catch (err) {
@@ -238,5 +318,25 @@ export function registerEngineInitMethods() {
       }
     }
     throw new Error(`All ${shuffled.length} remote config providers failed for ${chainName}`);
+  });
+
+  /**
+   * Rotate to the next available RPC provider for a chain.
+   * Called from Swift when a direct RPC call (e.g. signAndSend) fails.
+   *
+   * params: { chainName: string }
+   */
+  registerMethod("rotateChainProvider", async (params) => {
+    if (!engineInitialized) {
+      throw new Error("Engine not initialized. Call initEngine first.");
+    }
+    const { chainName } = params;
+    const rotated = await tryRotateProvider(chainName);
+    if (!rotated) {
+      throw new Error(`No alternative providers available for ${chainName}`);
+    }
+    const state = chainProviderState[chainName];
+    const url = state.candidates[state.currentIndex].provider;
+    return { chainName, rotated: true, providerUrl: url };
   });
 }

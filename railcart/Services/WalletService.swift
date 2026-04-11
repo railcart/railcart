@@ -213,6 +213,19 @@ final class LiveWalletService: WalletServiceProtocol {
 
     init(bridge: NodeBridge) {
         self.bridge = bridge
+
+        // Keep Swift-side RPCClient in sync when Node.js rotates providers.
+        bridge.onEvent("providerRotated") { [weak self] data in
+            guard let dict = data as? [String: Any],
+                  let chainName = dict["chainName"] as? String,
+                  let urlString = dict["providerUrl"] as? String,
+                  let url = URL(string: urlString)
+            else { return }
+            Task { @MainActor [weak self] in
+                self?.rpcClients[chainName] = RPCClient(url: url)
+                AppLogger.shared.log("rpc", "Provider rotated for \(chainName): \(urlString)")
+            }
+        }
     }
 
     private func rpc(for chainName: String) throws -> RPCClient {
@@ -222,8 +235,47 @@ final class LiveWalletService: WalletServiceProtocol {
         return client
     }
 
+    /// Whether an error looks like a provider connectivity issue (vs. a logic error).
+    private func isProviderError(_ error: Error) -> Bool {
+        if error is URLError { return true }
+        if case RPCError.httpError(let code, _, _) = error {
+            return [429, 502, 503, 504].contains(code)
+        }
+        return false
+    }
+
+    /// Ask Node.js to rotate to the next available RPC for this chain.
+    /// Updates the local RPCClient on success (via the providerRotated event).
+    private func rotateProvider(for chainName: String) async -> Bool {
+        do {
+            let _ = try await bridge.callRaw("rotateChainProvider", params: [
+                "chainName": chainName,
+            ])
+            return true
+        } catch {
+            AppLogger.shared.log("rpc", "Provider rotation failed for \(chainName): \(error.localizedDescription)")
+            return false
+        }
+    }
+
     /// Sign and broadcast a transaction in Swift. Private key never leaves this process.
+    /// On provider failure, rotates to the next RPC and retries once.
     private func signAndSend(
+        chainName: String,
+        privateKey: String,
+        txData: TransactionData
+    ) async throws -> String {
+        do {
+            return try await executeSignAndSend(chainName: chainName, privateKey: privateKey, txData: txData)
+        } catch {
+            guard isProviderError(error) else { throw error }
+            AppLogger.shared.log("rpc", "Provider error in signAndSend, attempting rotation: \(error.localizedDescription)")
+            guard await rotateProvider(for: chainName) else { throw error }
+            return try await executeSignAndSend(chainName: chainName, privateKey: privateKey, txData: txData)
+        }
+    }
+
+    private func executeSignAndSend(
         chainName: String,
         privateKey: String,
         txData: TransactionData
