@@ -150,7 +150,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: Binding(
-            get: { bridge.isReady && walletState.step != .ready },
+            get: { bridge.isEngineReady && walletState.step != .ready },
             set: { _ in }
         )) {
             WalletSetupView()

@@ -40,6 +40,8 @@ private struct PendingRequest: Sendable {
 final class NodeBridge {
     private(set) var isRunning = false
     private(set) var isReady = false
+    /// True after ``initEngine`` has completed successfully.
+    var isEngineReady = false
     private(set) var errorMessage: String?
 
     private var process: Process?
@@ -108,6 +110,7 @@ final class NodeBridge {
                 guard let self else { return }
                 self.isRunning = false
                 self.isReady = false
+                self.isEngineReady = false
                 let pending = self.pendingRequests
                 self.pendingRequests.removeAll()
                 for (_, req) in pending {
@@ -170,6 +173,7 @@ final class NodeBridge {
         process = nil
         isRunning = false
         isReady = false
+        isEngineReady = false
     }
 
     /// Send a request to Node.js and await the typed response.

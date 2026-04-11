@@ -78,6 +78,7 @@ struct RailcartApp: App {
                         initParams["ethereumRpcUrl"] = customEthRPC
                     }
                     try? await bridge.callRaw("initEngine", params: initParams)
+                    bridge.isEngineReady = true
                     // Load provider for the initial chain only; others load on demand
                     try? await networkState.ensureProviderLoaded(
                         for: networkState.selectedChain, using: walletService
