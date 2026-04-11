@@ -116,7 +116,12 @@ struct WalletDetailView: View {
             }
         }
         .sheet(item: $shieldToken) { token in
-            ShieldSheet(token: token, wallet: wallet, unlocked: unlocked)
+            ShieldSheet(
+                token: token,
+                wallet: wallet,
+                unlocked: unlocked,
+                publicBalance: publicBalanceWei(for: token)
+            )
         }
         .sheet(item: $unshieldToken) { token in
             UnshieldSheet(token: token, wallet: wallet, unlocked: unlocked)
@@ -210,6 +215,15 @@ struct WalletDetailView: View {
         balanceService.invalidateAllPrivateBalances(chainName: chain)
         let walletIDs = walletState.wallets.map(\.id)
         await balanceService.scanAllPrivateBalances(chainName: chain, walletIDs: walletIDs)
+    }
+
+    /// Look up the public balance (in wei / smallest unit) for a token.
+    private func publicBalanceWei(for token: Token) -> String? {
+        if token.symbol == "ETH" {
+            return ethBalance
+        }
+        guard let addr = token.address(on: network.selectedChain) else { return nil }
+        return publicTokenBalances[addr.lowercased()]
     }
 
     /// Shield transactions from this wallet on the current chain within the last hour.

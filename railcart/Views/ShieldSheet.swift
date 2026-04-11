@@ -17,6 +17,8 @@ struct ShieldSheet: View {
     let token: Token
     let wallet: Wallet
     let unlocked: Wallet.Unlocked
+    /// Public balance of this token in its smallest unit (wei), used for "Max" calculation.
+    let publicBalance: String?
 
     @State private var amount = ""
     @State private var isWorking = false
@@ -25,6 +27,34 @@ struct ShieldSheet: View {
     @State private var resultTxHash: String?
 
     private var isERC20: Bool { token.symbol != "ETH" }
+
+    /// Returns (exceedsBalance, maxHuman) if the entered amount + shield fee would exceed the
+    /// public balance. For ERC-20s the contract pulls amount * 1.0025 via transferFrom.
+    private var exceedsBalance: (maxHuman: String, maxWei: Decimal)? {
+        guard isERC20,
+              let balStr = publicBalance, let balWei = Decimal(string: balStr), balWei > 0,
+              let parsed = Decimal(string: amount), parsed > 0 else { return nil }
+        let divisor = pow(Decimal(10), token.decimals)
+        let handler = NSDecimalNumberHandler(
+            roundingMode: .down, scale: 0,
+            raiseOnExactness: false, raiseOnOverflow: false,
+            raiseOnUnderflow: false, raiseOnDivideByZero: false
+        )
+        let enteredWei = NSDecimalNumber(decimal: parsed * divisor)
+            .rounding(accordingToBehavior: handler).decimalValue
+        // The contract will try to pull enteredWei * 10025 / 10000
+        let totalRequired = NSDecimalNumber(decimal: enteredWei * 10025 / 10000)
+            .rounding(accordingToBehavior: NSDecimalNumberHandler(
+                roundingMode: .up, scale: 0,
+                raiseOnExactness: false, raiseOnOverflow: false,
+                raiseOnUnderflow: false, raiseOnDivideByZero: false
+            )).decimalValue
+        guard totalRequired > balWei else { return nil }
+        let maxWei = NSDecimalNumber(decimal: balWei * 10000 / 10025)
+            .rounding(accordingToBehavior: handler).decimalValue
+        let maxHuman = NSDecimalNumber(decimal: maxWei / divisor).stringValue
+        return (maxHuman, maxWei)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -43,9 +73,24 @@ struct ShieldSheet: View {
                     Text(network.selectedChain.displayName)
                 }
                 Section {
-                    TextField("Amount in \(token.symbol)", text: $amount)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(isWorking || resultTxHash != nil)
+                    HStack {
+                        TextField("Amount in \(token.symbol)", text: $amount)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(isWorking || resultTxHash != nil)
+                        if publicBalance != nil && resultTxHash == nil && !isWorking {
+                            Button("Max") { fillMaxAmount() }
+                                .buttonStyle(.borderless)
+                        }
+                    }
+                    if let exceeded = exceedsBalance {
+                        Text("Amount + 0.25% shield fee exceeds your balance. Max: \(exceeded.maxHuman) \(token.symbol)")
+                            .font(.caption2)
+                            .foregroundStyle(.red)
+                    } else if isERC20 {
+                        Text("A 0.25% shield fee is added by the RAILGUN contract.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -82,7 +127,7 @@ struct ShieldSheet: View {
                     }
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
-                    .disabled(amount.isEmpty || isWorking)
+                    .disabled(amount.isEmpty || isWorking || exceedsBalance != nil)
                 }
             }
         }
@@ -104,6 +149,31 @@ struct ShieldSheet: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+        }
+    }
+
+    /// RAILGUN shield fee: 25 basis points (0.25%).
+    /// For ERC-20s the contract pulls `amount * 10025 / 10000` via transferFrom,
+    /// so the max shieldable amount is `balance * 10000 / 10025`.
+    private func fillMaxAmount() {
+        guard let balWei = publicBalance, let balInt = Decimal(string: balWei), balInt > 0 else { return }
+        let divisor = pow(Decimal(10), token.decimals)
+        if isERC20 {
+            // max = floor(balance * 10000 / 10025) to leave room for the shield fee
+            let handler = NSDecimalNumberHandler(
+                roundingMode: .down, scale: 0,
+                raiseOnExactness: false, raiseOnOverflow: false,
+                raiseOnUnderflow: false, raiseOnDivideByZero: false
+            )
+            let maxWei = NSDecimalNumber(decimal: balInt * 10000 / 10025)
+                .rounding(accordingToBehavior: handler).decimalValue
+            let human = maxWei / divisor
+            amount = NSDecimalNumber(decimal: human).stringValue
+        } else {
+            // For ETH the value is sent directly (no transferFrom), so gas is the
+            // only concern. Just fill the raw balance and let the user adjust.
+            let human = balInt / divisor
+            amount = NSDecimalNumber(decimal: human).stringValue
         }
     }
 
