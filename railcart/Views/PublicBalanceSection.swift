@@ -56,7 +56,7 @@ struct PublicBalanceSection: View {
                         token: token,
                         balance: balance,
                         action: .shield,
-                        actionState: .unsupported,  // ERC-20 shield bridge not implemented yet
+                        actionState: hasNonZero(balance) ? .enabled : .zeroBalance,
                         onAction: { onShield?(token) }
                     )
                 }

@@ -53,6 +53,9 @@ struct MockWalletService: WalletServiceProtocol {
     }
 
     func shieldBaseToken(chainName: String, railgunAddress: String, amount: String, privateKey: String) async throws -> String { "0xmocktxhash" }
+    func getERC20Allowance(chainName: String, tokenAddress: String, ownerAddress: String) async throws -> String { "0" }
+    func approveERC20ForShield(chainName: String, tokenAddress: String, amount: String?, privateKey: String) async throws -> String { "0xmockapprovetxhash" }
+    func shieldERC20(chainName: String, railgunAddress: String, tokenAddress: String, amount: String, privateKey: String) async throws -> String { "0xmocktxhash" }
     func unshieldBaseToken(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
 
     func scanBalances(chainName: String, walletIDs: [String]) async throws {}

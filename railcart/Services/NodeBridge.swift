@@ -191,12 +191,41 @@ final class NodeBridge {
         let id = UUID().uuidString
         let request: [String: Any] = ["id": id, "method": method, "params": params]
 
-        let result: any Sendable = try await withCheckedThrowingContinuation { cont in
-            pendingRequests[id] = PendingRequest(continuation: cont)
-            sendJSON(request)
+        let sanitizedParams = Self.sanitizeParams(params)
+        AppLogger.shared.log("bridge", "→ \(method) [\(id.prefix(8))] \(sanitizedParams)")
+        let start = ContinuousClock.now
+
+        let result: any Sendable
+        do {
+            result = try await withCheckedThrowingContinuation { cont in
+                pendingRequests[id] = PendingRequest(continuation: cont)
+                sendJSON(request)
+            }
+        } catch {
+            let elapsed = ContinuousClock.now - start
+            AppLogger.shared.log("bridge", "✗ \(method) [\(id.prefix(8))] failed after \(elapsed): \(error.localizedDescription)")
+            throw error
         }
 
+        let elapsed = ContinuousClock.now - start
+        AppLogger.shared.log("bridge", "← \(method) [\(id.prefix(8))] ok (\(elapsed))")
         return result
+    }
+
+    /// Remove sensitive values from params before logging.
+    private static func sanitizeParams(_ params: [String: any Sendable]) -> String {
+        let sensitiveKeys: Set<String> = ["privateKey", "encryptionKey", "mnemonic", "password"]
+        var parts: [String] = []
+        for (key, value) in params {
+            if sensitiveKeys.contains(key) {
+                parts.append("\(key):***")
+            } else if let s = value as? String, s.count > 80 {
+                parts.append("\(key):\(s.prefix(40))…")
+            } else {
+                parts.append("\(key):\(value)")
+            }
+        }
+        return "{\(parts.joined(separator: ", "))}"
     }
 
     /// Register a handler for events from Node.js.

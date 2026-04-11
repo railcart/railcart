@@ -111,6 +111,16 @@ export function isEngineInitialized() {
   return engineInitialized;
 }
 
+/**
+ * Get the current RPC provider URL for a chain (for logging).
+ */
+export function currentProviderUrl(chainName) {
+  const state = chainProviderState[chainName];
+  if (!state) return "(no provider)";
+  const candidate = state.candidates[state.currentIndex];
+  return candidate?.provider ?? "(unknown)";
+}
+
 export function registerEngineInitMethods() {
   /**
    * Initialize the RAILGUN engine.
@@ -294,27 +304,32 @@ export function registerEngineInitMethods() {
     }
 
     // Shuffle and try each provider individually until one passes a real
-    // health check (getBlockNumber). Store all candidates for later rotation
-    // if the chosen provider degrades mid-session.
+    // health check (getBlockNumber). Retry once after a delay — the SDK's
+    // loadProvider network detection is flaky on public RPCs.
     const shuffled = allProviders.sort(() => Math.random() - 0.5);
-    for (let i = 0; i < shuffled.length; i++) {
-      const candidate = shuffled[i];
-      try {
-        const providerConfig = { chainId: chain.id, providers: [candidate] };
-        await loadProvider(providerConfig, networkName);
-        await healthCheckProvider(networkName);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) {
+        process.stderr.write(`[sync] Retrying provider load for ${chainName} after 3s\n`);
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+      for (let i = 0; i < shuffled.length; i++) {
+        const candidate = shuffled[i];
+        try {
+          const providerConfig = { chainId: chain.id, providers: [candidate] };
+          await loadProvider(providerConfig, networkName);
+          await healthCheckProvider(networkName);
 
-        // Store the full shuffled list so rotation can try the rest.
-        chainProviderState[chainName] = {
-          candidates: shuffled,
-          currentIndex: i,
-          networkName,
-        };
+          chainProviderState[chainName] = {
+            candidates: shuffled,
+            currentIndex: i,
+            networkName,
+          };
 
-        process.stderr.write(`[sync] Loaded provider from remote config for ${chainName} (${networkName}): ${candidate.provider}\n`);
-        return { chainName, loaded: true, providerCount: 1, providerUrls: [candidate.provider] };
-      } catch (err) {
-        process.stderr.write(`[sync] Provider ${candidate.provider} failed for ${chainName}: ${err?.message || err}\n`);
+          process.stderr.write(`[sync] Loaded provider from remote config for ${chainName} (${networkName}): ${candidate.provider}\n`);
+          return { chainName, loaded: true, providerCount: 1, providerUrls: [candidate.provider] };
+        } catch (err) {
+          process.stderr.write(`[sync] Provider ${candidate.provider} failed for ${chainName}: ${err?.message || err}\n`);
+        }
       }
     }
     throw new Error(`All ${shuffled.length} remote config providers failed for ${chainName}`);
@@ -339,4 +354,5 @@ export function registerEngineInitMethods() {
     const url = state.candidates[state.currentIndex].provider;
     return { chainName, rotated: true, providerUrl: url };
   });
+
 }

@@ -70,6 +70,7 @@ async function handleMessage(line) {
     const result = await handler(params ?? {});
     sendResponse(id, result ?? null);
   } catch (err) {
+    process.stderr.write(`[bridge] ${method} failed: ${err.message ?? err}\n`);
     sendError(id, -32000, err.message ?? String(err));
   }
 }

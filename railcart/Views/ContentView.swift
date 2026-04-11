@@ -167,6 +167,7 @@ struct ContentView: View {
         }
         .onChange(of: network.selectedChain) {
             AppLogger.shared.log("sync", "Chain switched to \(network.selectedChain.rawValue)")
+            network.providerError = nil
             balanceService?.resetScanState()
             Task { await syncPrivateBalances() }
         }
@@ -233,7 +234,12 @@ struct ContentView: View {
         let walletIDs = walletState.wallets.map(\.id)
         guard !walletIDs.isEmpty else { return }
         guard !balanceService.hasAllPrivateBalances(chainName: chain.rawValue, walletIDs: walletIDs) else { return }
-        try? await network.ensureProviderLoaded(for: chain, using: service)
+        do {
+            try await network.ensureProviderLoaded(for: chain, using: service)
+        } catch {
+            AppLogger.shared.log("sync", "Skipping private balance sync — no provider for \(chain.rawValue)")
+            return
+        }
         await balanceService.scanAllPrivateBalances(chainName: chain.rawValue, walletIDs: walletIDs)
     }
 

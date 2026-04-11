@@ -2,7 +2,7 @@
 //  ShieldSheet.swift
 //  railcart
 //
-//  Compact sheet to shield a base token (ETH → private WETH) from a specific wallet.
+//  Sheet to shield a token (ETH or ERC-20) from public to private.
 //
 
 import SwiftUI
@@ -23,6 +23,8 @@ struct ShieldSheet: View {
     @State private var statusMessage: String?
     @State private var errorMessage: String?
     @State private var resultTxHash: String?
+
+    private var isERC20: Bool { token.symbol != "ETH" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -114,23 +116,39 @@ struct ShieldSheet: View {
             return
         }
 
-        guard let ethAmount = Double(amount) else {
+        guard let parsedAmount = Decimal(string: amount), parsedAmount > 0 else {
             errorMessage = "Invalid amount"
             return
         }
-        let weiAmount = String(format: "%.0f", ethAmount * 1e18)
+        let divisor = pow(Decimal(10), token.decimals)
+        let handler = NSDecimalNumberHandler(
+            roundingMode: .plain, scale: 0,
+            raiseOnExactness: false, raiseOnOverflow: false,
+            raiseOnUnderflow: false, raiseOnDivideByZero: false
+        )
+        let preciseAmount = NSDecimalNumber(decimal: parsedAmount * divisor)
+            .rounding(accordingToBehavior: handler).stringValue
 
         isWorking = true
         errorMessage = nil
-        statusMessage = "Submitting shield transaction..."
 
         do {
-            let txHash = try await service.shieldBaseToken(
-                chainName: network.selectedChain.rawValue,
-                railgunAddress: railgunAddress,
-                amount: weiAmount,
-                privateKey: unlocked.ethPrivateKey
-            )
+            let txHash: String
+            if isERC20 {
+                txHash = try await shieldERC20(
+                    chainName: network.selectedChain.rawValue,
+                    railgunAddress: railgunAddress,
+                    amount: preciseAmount
+                )
+            } else {
+                statusMessage = "Submitting shield transaction..."
+                txHash = try await service.shieldBaseToken(
+                    chainName: network.selectedChain.rawValue,
+                    railgunAddress: railgunAddress,
+                    amount: preciseAmount,
+                    privateKey: unlocked.ethPrivateKey
+                )
+            }
             resultTxHash = txHash
             statusMessage = nil
             transactionStore.record(Transaction(
@@ -147,11 +165,65 @@ struct ShieldSheet: View {
             ))
             let chain = network.selectedChain.rawValue
             balanceService?.invalidateEthBalance(chainName: chain, address: unlocked.ethAddress)
+            balanceService?.invalidateERC20Balances(chainName: chain, address: unlocked.ethAddress)
             balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = nil
         }
         isWorking = false
+    }
+
+    private func shieldERC20(
+        chainName: String,
+        railgunAddress: String,
+        amount: String
+    ) async throws -> String {
+        guard let tokenAddress = token.address(on: network.selectedChain) else {
+            throw ShieldError.noTokenAddress
+        }
+
+        // Step 1: Check allowance
+        statusMessage = "Checking token approval..."
+        let allowance = try await service.getERC20Allowance(
+            chainName: chainName,
+            tokenAddress: tokenAddress,
+            ownerAddress: unlocked.ethAddress
+        )
+
+        let neededAmount = Decimal(string: amount) ?? 0
+        let currentAllowance = Decimal(string: allowance) ?? 0
+
+        // Step 2: Approve if needed
+        if currentAllowance < neededAmount {
+            statusMessage = "Approving \(token.symbol) for shielding..."
+            _ = try await service.approveERC20ForShield(
+                chainName: chainName,
+                tokenAddress: tokenAddress,
+                amount: nil, // max approval
+                privateKey: unlocked.ethPrivateKey
+            )
+        }
+
+        // Step 3: Shield
+        statusMessage = "Submitting shield transaction..."
+        return try await service.shieldERC20(
+            chainName: chainName,
+            railgunAddress: railgunAddress,
+            tokenAddress: tokenAddress,
+            amount: amount,
+            privateKey: unlocked.ethPrivateKey
+        )
+    }
+}
+
+enum ShieldError: LocalizedError {
+    case noTokenAddress
+
+    var errorDescription: String? {
+        switch self {
+        case .noTokenAddress:
+            "This token is not available on the selected network."
+        }
     }
 }

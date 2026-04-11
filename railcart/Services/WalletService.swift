@@ -38,6 +38,9 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func getEthBalance(chainName: String, address: String) async throws -> String { fatalError() }
     func getERC20Balances(chainName: String, address: String, tokenAddresses: [String]) async throws -> [TokenBalance] { fatalError() }
     func shieldBaseToken(chainName: String, railgunAddress: String, amount: String, privateKey: String) async throws -> String { fatalError() }
+    func getERC20Allowance(chainName: String, tokenAddress: String, ownerAddress: String) async throws -> String { fatalError() }
+    func approveERC20ForShield(chainName: String, tokenAddress: String, amount: String?, privateKey: String) async throws -> String { fatalError() }
+    func shieldERC20(chainName: String, railgunAddress: String, tokenAddress: String, amount: String, privateKey: String) async throws -> String { fatalError() }
     func unshieldBaseToken(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func scanBalances(chainName: String, walletIDs: [String]) async throws { fatalError() }
     func fullRescan(chainName: String, walletIDs: [String]) async throws { fatalError() }
@@ -168,6 +171,27 @@ protocol WalletServiceProtocol: Sendable {
         privateKey: String
     ) async throws -> String // txHash
 
+    func getERC20Allowance(
+        chainName: String,
+        tokenAddress: String,
+        ownerAddress: String
+    ) async throws -> String // allowance in wei
+
+    func approveERC20ForShield(
+        chainName: String,
+        tokenAddress: String,
+        amount: String?,
+        privateKey: String
+    ) async throws -> String // txHash
+
+    func shieldERC20(
+        chainName: String,
+        railgunAddress: String,
+        tokenAddress: String,
+        amount: String,
+        privateKey: String
+    ) async throws -> String // txHash
+
     func unshieldBaseToken(
         chainName: String,
         walletID: String,
@@ -235,6 +259,20 @@ final class LiveWalletService: WalletServiceProtocol {
         return client
     }
 
+    /// Format an RPC error with provider URL and HTTP status for logging.
+    private func describeRPCError(_ error: Error) -> String {
+        if case RPCError.httpError(let code, let method, let url) = error {
+            return "http=\(code) method=\(method) url=\(url)"
+        }
+        if case RPCError.rpcError(let code, let message) = error {
+            return "rpc_code=\(code) \(message)"
+        }
+        if let urlError = error as? URLError {
+            return "url_error=\(urlError.code.rawValue) \(urlError.localizedDescription)"
+        }
+        return error.localizedDescription
+    }
+
     /// Whether an error looks like a provider connectivity issue (vs. a logic error).
     private func isProviderError(_ error: Error) -> Bool {
         if error is URLError { return true }
@@ -268,8 +306,13 @@ final class LiveWalletService: WalletServiceProtocol {
         do {
             return try await executeSignAndSend(chainName: chainName, privateKey: privateKey, txData: txData)
         } catch {
-            guard isProviderError(error) else { throw error }
-            AppLogger.shared.log("rpc", "Provider error in signAndSend, attempting rotation: \(error.localizedDescription)")
+            let url = (try? rpc(for: chainName))?.url.absoluteString ?? "(unknown)"
+            let detail = describeRPCError(error)
+            guard isProviderError(error) else {
+                AppLogger.shared.log("rpc", "signAndSend failed (not retryable) provider=\(url) \(detail)")
+                throw error
+            }
+            AppLogger.shared.log("rpc", "signAndSend provider error provider=\(url) \(detail) — rotating")
             guard await rotateProvider(for: chainName) else { throw error }
             return try await executeSignAndSend(chainName: chainName, privateKey: privateKey, txData: txData)
         }
@@ -439,6 +482,60 @@ final class LiveWalletService: WalletServiceProtocol {
             "amount": amount,
         ], as: ShieldTransactionResponse.self)
 
+        return try await signAndSend(
+            chainName: chainName,
+            privateKey: privateKey,
+            txData: shieldResult.transaction
+        )
+    }
+
+    func getERC20Allowance(
+        chainName: String,
+        tokenAddress: String,
+        ownerAddress: String
+    ) async throws -> String {
+        struct AllowanceResponse: Decodable { let allowance: String }
+        let result = try await bridge.call("getERC20Allowance", params: [
+            "chainName": chainName,
+            "tokenAddress": tokenAddress,
+            "ownerAddress": ownerAddress,
+        ], as: AllowanceResponse.self)
+        return result.allowance
+    }
+
+    func approveERC20ForShield(
+        chainName: String,
+        tokenAddress: String,
+        amount: String?,
+        privateKey: String
+    ) async throws -> String {
+        var params: [String: Any] = [
+            "chainName": chainName,
+            "tokenAddress": tokenAddress,
+        ]
+        if let amount { params["amount"] = amount }
+        let approveResult = try await bridge.call("approveERC20ForShield",
+            params: params, as: ShieldTransactionResponse.self)
+        return try await signAndSend(
+            chainName: chainName,
+            privateKey: privateKey,
+            txData: approveResult.transaction
+        )
+    }
+
+    func shieldERC20(
+        chainName: String,
+        railgunAddress: String,
+        tokenAddress: String,
+        amount: String,
+        privateKey: String
+    ) async throws -> String {
+        let shieldResult = try await bridge.call("shieldERC20", params: [
+            "chainName": chainName,
+            "railgunAddress": railgunAddress,
+            "tokenAddress": tokenAddress,
+            "amount": amount,
+        ], as: ShieldTransactionResponse.self)
         return try await signAndSend(
             chainName: chainName,
             privateKey: privateKey,

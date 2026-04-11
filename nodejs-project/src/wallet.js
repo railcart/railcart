@@ -1,6 +1,6 @@
 import { registerMethod, sendEvent } from "./bridge.js";
 import { chainForName, CHAINS } from "./chains.js";
-import { isEngineInitialized, tryRotateProvider } from "./engine-init.js";
+import { isEngineInitialized, tryRotateProvider, currentProviderUrl } from "./engine-init.js";
 import {
   createRailgunWallet,
   loadWalletByID,
@@ -63,15 +63,31 @@ function isProviderError(err) {
  * next available RPC for the given chain and retry once.
  */
 async function withProviderRetry(chainName, fn) {
+  const url = currentProviderUrl(chainName);
   try {
     return await fn();
   } catch (err) {
-    if (!isProviderError(err)) throw err;
-    process.stderr.write(
-      `[sync] Provider error for ${chainName}, attempting rotation: ${err?.message || err}\n`
-    );
+    const status = err?.status ?? err?.statusCode ?? "";
+    const code = err?.code ?? "";
+    const detail = [
+      `provider=${url}`,
+      status ? `http=${status}` : "",
+      code ? `code=${code}` : "",
+      err?.message || String(err),
+    ].filter(Boolean).join(" ");
+
+    if (!isProviderError(err)) {
+      process.stderr.write(`[rpc] ${chainName} error (not retryable): ${detail}\n`);
+      throw err;
+    }
+    process.stderr.write(`[rpc] ${chainName} provider error: ${detail} — rotating\n`);
     const rotated = await tryRotateProvider(chainName);
-    if (!rotated) throw err;
+    if (!rotated) {
+      process.stderr.write(`[rpc] ${chainName} no alternative providers, failing\n`);
+      throw err;
+    }
+    const newUrl = currentProviderUrl(chainName);
+    process.stderr.write(`[rpc] ${chainName} retrying with ${newUrl}\n`);
     return await fn();
   }
 }
@@ -417,6 +433,8 @@ export function registerWalletMethods() {
     return withProviderRetry(chainName, async () => {
       const provider = getFallbackProviderForNetwork(networkName);
       const balanceOfSelector = "0x70a08231";
+      let failures = 0;
+      let lastError;
       const balances = await Promise.all(
         tokenAddresses.map(async (tokenAddress) => {
           try {
@@ -426,11 +444,16 @@ export function registerWalletMethods() {
               data: balanceOfSelector + paddedAddress.slice(2),
             });
             return { tokenAddress, amount: BigInt(result).toString() };
-          } catch {
+          } catch (err) {
+            failures++;
+            lastError = err;
             return { tokenAddress, amount: "0" };
           }
         })
       );
+      if (failures === balances.length) {
+        throw new Error(`All ERC-20 balance calls failed: ${lastError?.message}`);
+      }
       return { balances };
     });
   });
@@ -468,6 +491,107 @@ export function registerWalletMethods() {
       railgunAddress,
       shieldPrivateKey,
       wrappedERC20Amount,
+    );
+
+    return { transaction: serializeTransaction(result.transaction) };
+  });
+
+  /**
+   * Check ERC-20 allowance for the RAILGUN proxy contract.
+   *
+   * params: {
+   *   chainName: string,
+   *   tokenAddress: string,
+   *   ownerAddress: string,
+   * }
+   */
+  registerMethod("getERC20Allowance", async (params) => {
+    requireEngine();
+    const { chainName, tokenAddress, ownerAddress } = params;
+    if (!tokenAddress || !ownerAddress) {
+      throw new Error("tokenAddress and ownerAddress are required");
+    }
+    const { networkName } = chainForName(chainName);
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const proxyContract = NETWORK_CONFIG[networkName].proxyContract;
+      // allowance(address owner, address spender) selector: 0xdd62ed3e
+      const paddedOwner = ownerAddress.slice(2).padStart(64, "0");
+      const paddedSpender = proxyContract.slice(2).padStart(64, "0");
+      const result = await provider.call({
+        to: tokenAddress,
+        data: "0xdd62ed3e" + paddedOwner + paddedSpender,
+      });
+      return { allowance: BigInt(result).toString() };
+    });
+  });
+
+  /**
+   * Build an ERC-20 approve transaction for the RAILGUN proxy contract.
+   *
+   * params: {
+   *   chainName: string,
+   *   tokenAddress: string,
+   *   amount: string,  // amount to approve (in wei), or omit for max approval
+   * }
+   */
+  registerMethod("approveERC20ForShield", async (params) => {
+    requireEngine();
+    const { chainName, tokenAddress, amount } = params;
+    if (!tokenAddress) {
+      throw new Error("tokenAddress is required");
+    }
+    const { networkName } = chainForName(chainName);
+    const proxyContract = NETWORK_CONFIG[networkName].proxyContract;
+    // approve(address spender, uint256 amount) selector: 0x095ea7b3
+    const paddedSpender = proxyContract.slice(2).padStart(64, "0");
+    const approveAmount = amount
+      ? BigInt(amount).toString(16).padStart(64, "0")
+      : "f".repeat(64); // max uint256
+    return {
+      transaction: {
+        to: tokenAddress,
+        data: "0x095ea7b3" + paddedSpender + approveAmount,
+        value: "0",
+      },
+    };
+  });
+
+  /**
+   * Shield an ERC-20 token into RAILGUN private balance.
+   *
+   * params: {
+   *   chainName: string,
+   *   railgunAddress: string,
+   *   tokenAddress: string,
+   *   amount: string,          // in token's smallest unit (wei for 18-decimal tokens)
+   * }
+   */
+  registerMethod("shieldERC20", async (params) => {
+    requireEngine();
+    const { chainName, railgunAddress, tokenAddress, amount } = params;
+    if (!railgunAddress || !tokenAddress || !amount) {
+      throw new Error("railgunAddress, tokenAddress, and amount are required");
+    }
+    const { networkName } = chainForName(chainName);
+    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
+
+    const shieldPrivateKey = "0x" + crypto.randomBytes(32).toString("hex");
+
+    const erc20AmountRecipients = [
+      {
+        tokenAddress,
+        amount: BigInt(amount),
+        recipientAddress: railgunAddress,
+      },
+    ];
+
+    const result = await populateShield(
+      txidVersion,
+      networkName,
+      shieldPrivateKey,
+      erc20AmountRecipients,
+      [], // nftAmountRecipients
     );
 
     return { transaction: serializeTransaction(result.transaction) };
