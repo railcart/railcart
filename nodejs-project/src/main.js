@@ -3,6 +3,7 @@ import { registerEngineInitMethods } from "./engine-init.js";
 import { registerBroadcasterMethods } from "./broadcaster.js";
 import { registerWalletMethods } from "./wallet.js";
 import { registerRemoteConfigMethods } from "./remote-config.js";
+import { registerNativeProofMethods } from "./native-proof.js";
 
 // Prevent unhandled errors from crashing the process
 process.on("unhandledRejection", (err) => {
@@ -28,6 +29,7 @@ registerEngineInitMethods();
 registerBroadcasterMethods();
 registerWalletMethods();
 registerRemoteConfigMethods();
+registerNativeProofMethods();
 
 // Start the bridge
 startBridge();

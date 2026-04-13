@@ -75,8 +75,11 @@ public struct ScanEvents: Sendable {
     public let unshields: [UnshieldEvent]
 }
 
-/// A commitment from scanning (either shield or transact).
+/// A commitment from scanning (shield, transact, or opaque).
+/// Opaque commitments are legacy types we can't decrypt but still need in the merkle tree.
 public enum ScanCommitment: Sendable {
     case shield(ShieldCommitment)
     case transact(TransactCommitment)
+    /// A commitment we can't decrypt (legacy type) but has a known hash and tree position.
+    case opaque(hash: Data, utxoTree: Int, utxoIndex: Int, blockNumber: Int)
 }

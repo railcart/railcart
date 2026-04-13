@@ -100,6 +100,7 @@ public struct QuickSync: Sendable {
         switch c {
         case .transact(let t): return t.blockNumber
         case .shield(let s): return s.blockNumber
+        case .opaque(_, _, _, let b): return b
         }
     }
 
@@ -319,8 +320,13 @@ public struct QuickSync: Sendable {
             ))
 
         default:
-            // Legacy commitment types — skip for now
-            return nil
+            // Legacy or unknown commitment types — can't decrypt but need in merkle tree
+            return .opaque(
+                hash: hexToBytes32(bigIntHex(raw.hash)),
+                utxoTree: raw.treeNumber,
+                utxoIndex: raw.treePosition,
+                blockNumber: Int(raw.blockNumber) ?? 0
+            )
         }
     }
 

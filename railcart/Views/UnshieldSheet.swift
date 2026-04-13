@@ -353,95 +353,58 @@ struct UnshieldSheet: View {
             return
         }
 
-        isWorking = true
-        errorMessage = nil
-        statusMessage = "Syncing balances..."
-
-        do {
-            try await service.scanBalances(
-                chainName: network.selectedChain.rawValue,
-                walletIDs: [wallet.id]
-            )
-        } catch {
-            // Non-fatal
+        // Resolve token address (WETH for base token, ERC20 address otherwise)
+        let tokenAddress: String
+        if isERC20 {
+            guard let addr = token.address(on: network.selectedChain) else {
+                errorMessage = "Token not supported on this chain"
+                return
+            }
+            tokenAddress = addr
+        } else {
+            guard let wethAddr = Token.weth.address(on: network.selectedChain) else {
+                errorMessage = "Token not supported on this chain"
+                return
+            }
+            tokenAddress = wethAddr
         }
 
+        isWorking = true
+        errorMessage = nil
         proofProgress = 0
         statusMessage = "Generating zero-knowledge proof..."
 
-        do {
-            let txHash = try await generateDirectProofAndSend(
-                chainName: network.selectedChain.rawValue,
-                encryptionKey: encryptionKey,
-                weiAmount: weiAmount
-            )
-            finishWithTxHash(txHash)
-        } catch let firstError {
-            // If proof failed due to missing UTXO commitments, do a full rescan and retry
-            if firstError.localizedDescription.contains("UTXO blinded commitments") {
-                statusMessage = "Rescanning merkle tree..."
-                proofProgress = nil
-                do {
-                    try await service.fullRescan(
-                        chainName: network.selectedChain.rawValue,
-                        walletIDs: [wallet.id]
-                    )
-                    proofProgress = 0
-                    statusMessage = "Generating zero-knowledge proof..."
-                    let txHash = try await generateDirectProofAndSend(
-                        chainName: network.selectedChain.rawValue,
-                        encryptionKey: encryptionKey,
-                        weiAmount: weiAmount
-                    )
-                    finishWithTxHash(txHash)
-                } catch {
-                    errorMessage = error.localizedDescription
-                    statusMessage = nil
-                    proofProgress = nil
-                }
-            } else {
-                errorMessage = firstError.localizedDescription
-                statusMessage = nil
-                proofProgress = nil
-            }
+        guard let nativeScanner = balanceService?.nativeScanner,
+              let liveService = service as? LiveWalletService else {
+            errorMessage = "Scanner not available"
+            isWorking = false
+            return
         }
-        isWorking = false
-    }
 
-    private func generateDirectProofAndSend(
-        chainName: String,
-        encryptionKey: String,
-        weiAmount: String
-    ) async throws -> String {
-        if isERC20 {
-            guard let tokenAddress = token.address(on: network.selectedChain) else {
-                throw ShieldError.noTokenAddress
-            }
-            return try await service.unshieldERC20(
-                chainName: chainName,
+        do {
+            let txHash = try await liveService.unshieldWithNativeScanner(
+                chainName: network.selectedChain.rawValue,
                 walletID: wallet.id,
                 encryptionKey: encryptionKey,
                 toAddress: destination,
                 tokenAddress: tokenAddress,
                 amount: weiAmount,
                 privateKey: unlocked.ethPrivateKey,
+                nativeScanner: nativeScanner,
                 onProofProgress: { @Sendable progress in
                     Task { @MainActor in proofProgress = progress }
+                },
+                onStatusUpdate: { @Sendable status in
+                    Task { @MainActor in statusMessage = status }
                 }
             )
-        } else {
-            return try await service.unshieldBaseToken(
-                chainName: chainName,
-                walletID: wallet.id,
-                encryptionKey: encryptionKey,
-                toAddress: destination,
-                amount: weiAmount,
-                privateKey: unlocked.ethPrivateKey,
-                onProofProgress: { @Sendable progress in
-                    Task { @MainActor in proofProgress = progress }
-                }
-            )
+            finishWithTxHash(txHash)
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = nil
+            proofProgress = nil
         }
+        isWorking = false
     }
 
     // MARK: - Broadcaster Unshield
@@ -623,16 +586,6 @@ struct UnshieldSheet: View {
         broadcasterPollTask?.cancel()
         broadcasterPhase = .executing
         errorMessage = nil
-        statusMessage = "Syncing balances..."
-
-        do {
-            try await service.scanBalances(
-                chainName: network.selectedChain.rawValue,
-                walletIDs: [wallet.id]
-            )
-        } catch {
-            // Non-fatal
-        }
 
         let progressHandler: @Sendable (BroadcasterUnshieldStep) -> Void = { @Sendable step in
             Task { @MainActor in
@@ -682,69 +635,12 @@ struct UnshieldSheet: View {
             }
             if let prev = currentStep { completedSteps.insert("\(prev)") }
             finishWithTxHash(txHash)
-        } catch let firstError {
-            if firstError.localizedDescription.contains("UTXO blinded commitments") {
-                // Full rescan and retry
-                currentStep = nil
-                completedSteps = []
-                proofProgress = nil
-                statusMessage = "Rescanning merkle tree..."
-                do {
-                    try await service.fullRescan(
-                        chainName: network.selectedChain.rawValue,
-                        walletIDs: [wallet.id]
-                    )
-                    statusMessage = nil
-                    let retryHash: String
-                    if isERC20 {
-                        guard let tokenAddress = token.address(on: network.selectedChain),
-                              let feeAddr = resolvedFeeTokenAddress else {
-                            errorMessage = "Token not supported on this chain"
-                            broadcasterPhase = .idle
-                            return
-                        }
-                        retryHash = try await service.unshieldERC20ViaBroadcaster(
-                            chainName: network.selectedChain.rawValue,
-                            walletID: wallet.id,
-                            encryptionKey: encryptionKey,
-                            toAddress: destination,
-                            tokenAddress: tokenAddress,
-                            amount: weiAmount,
-                            broadcaster: broadcaster,
-                            feeEstimate: estimate,
-                            feeTokenAddress: feeAddr,
-                            onStep: progressHandler,
-                            onProofProgress: proofHandler
-                        )
-                    } else {
-                        retryHash = try await service.unshieldBaseTokenViaBroadcaster(
-                            chainName: network.selectedChain.rawValue,
-                            walletID: wallet.id,
-                            encryptionKey: encryptionKey,
-                            toAddress: destination,
-                            amount: weiAmount,
-                            broadcaster: broadcaster,
-                            feeEstimate: estimate,
-                            onStep: progressHandler,
-                            onProofProgress: proofHandler
-                        )
-                    }
-                    if let prev = currentStep { completedSteps.insert("\(prev)") }
-                    finishWithTxHash(retryHash)
-                } catch {
-                    errorMessage = error.localizedDescription
-                    broadcasterPhase = .idle
-                    currentStep = nil
-                    completedSteps = []
-                    proofProgress = nil
-                }
-            } else {
-                errorMessage = firstError.localizedDescription
-                broadcasterPhase = .idle
-                currentStep = nil
-                completedSteps = []
-                proofProgress = nil
-            }
+        } catch {
+            errorMessage = error.localizedDescription
+            broadcasterPhase = .idle
+            currentStep = nil
+            completedSteps = []
+            proofProgress = nil
         }
     }
 

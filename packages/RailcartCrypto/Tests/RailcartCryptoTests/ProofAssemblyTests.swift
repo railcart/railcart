@@ -116,40 +116,39 @@ struct ProofAssemblyTests {
     @Test("ProofInputs serializes to bridge JSON")
     func bridgeJSON() {
         let inputs = ProofInputs(
-            tokenHash: BigUInt(42),
-            spendingPublicKey: (x: BigUInt(1), y: BigUInt(2)),
-            nullifyingKey: BigUInt(3),
+            tokenAddress: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+            amount: BigUInt(1000000),
+            treeNumber: 0,
+            merkleRoot: BigUInt(999),
             inputs: [
                 ProofInputs.InputUTXO(
                     random: BigUInt(100),
-                    value: BigUInt(1000),
+                    value: BigUInt(1000000),
                     pathElements: [BigUInt](repeating: BigUInt(0), count: 16),
                     leafIndex: BigUInt(5)
                 ),
-            ],
-            outputs: [
-                ProofInputs.OutputNote(notePublicKey: BigUInt(10), value: BigUInt(800)),
-                ProofInputs.OutputNote(notePublicKey: BigUInt(11), value: BigUInt(200)),
-            ],
-            merkleRoot: BigUInt(999),
-            nullifiers: [BigUInt(555)],
-            commitmentsOut: [BigUInt(777), BigUInt(888)]
+            ]
         )
 
         let json = inputs.toBridgeJSON()
 
-        // Verify key fields are present and hex-formatted
         let tokenAddr = json["tokenAddress"] as? String
-        #expect(tokenAddr?.hasPrefix("0x") == true)
-        #expect(tokenAddr?.count == 66) // 0x + 64 hex chars
+        #expect(tokenAddr == "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48")
 
-        let pubKey = json["publicKey"] as? [String]
-        #expect(pubKey?.count == 2)
+        let amount = json["amount"] as? String
+        #expect(amount == "1000000")
 
-        let randomIn = json["randomIn"] as? [String]
-        #expect(randomIn?.count == 1)
+        let treeNumber = json["treeNumber"] as? Int
+        #expect(treeNumber == 0)
 
-        let npkOut = json["npkOut"] as? [String]
-        #expect(npkOut?.count == 2)
+        let merkleRoot = json["merkleRoot"] as? String
+        #expect(merkleRoot?.hasPrefix("0x") == true)
+
+        let utxos = json["utxos"] as? [[String: Any]]
+        #expect(utxos?.count == 1)
+        #expect((utxos?[0]["leafIndex"] as? Int) == 5)
+
+        let pathElements = utxos?[0]["pathElements"] as? [String]
+        #expect(pathElements?.count == 16)
     }
 }

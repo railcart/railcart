@@ -4,24 +4,17 @@ import Foundation
 /// Assembled proof inputs ready for the groth16 prover.
 /// Maps to the RAILGUN engine's PrivateInputsRailgun + PublicInputsRailgun.
 public struct ProofInputs: Sendable {
-    /// The token being spent (as a Poseidon hash of token data).
-    public let tokenHash: BigUInt
-    /// Spending public key [x, y] on BabyJubJub.
-    public let spendingPublicKey: (x: BigUInt, y: BigUInt)
-    /// Nullifying key.
-    public let nullifyingKey: BigUInt
+    /// The token address (ERC20 contract address, NOT a hash).
+    public let tokenAddress: String
+    /// Amount to unshield.
+    public let amount: BigUInt
+    /// Which merkle tree the UTXOs are in.
+    public let treeNumber: Int
+    /// Merkle root of the spending tree.
+    public let merkleRoot: BigUInt
 
     /// Per-input UTXO data (one entry per UTXO being spent).
     public let inputs: [InputUTXO]
-    /// Per-output note data (recipient + change notes).
-    public let outputs: [OutputNote]
-
-    /// Merkle root of the spending tree.
-    public let merkleRoot: BigUInt
-    /// Nullifiers for each input UTXO.
-    public let nullifiers: [BigUInt]
-    /// Commitment hashes for each output note.
-    public let commitmentsOut: [BigUInt]
 
     /// Data for a single input UTXO.
     public struct InputUTXO: Sendable {
@@ -29,18 +22,13 @@ public struct ProofInputs: Sendable {
         public let value: BigUInt
         public let pathElements: [BigUInt]  // 16 sibling hashes
         public let leafIndex: BigUInt
+        public let commitmentHash: BigUInt  // The actual merkle leaf hash from subgraph
     }
 
-    /// Data for a single output note.
-    public struct OutputNote: Sendable {
-        public let notePublicKey: BigUInt
-        public let value: BigUInt
-    }
 }
 
 /// Selects UTXOs and assembles proof inputs for a spend.
 public enum ProofAssembler {
-    /// Error types for proof assembly.
     public enum Error: Swift.Error, LocalizedError, Sendable {
         case insufficientBalance(have: BigUInt, need: BigUInt)
         case noSpendableUTXOs
@@ -58,97 +46,61 @@ public enum ProofAssembler {
         }
     }
 
-    /// Select UTXOs and build proof inputs for an unshield of `amount` of `tokenHash`.
+    /// Select UTXOs and build proof inputs for an unshield.
     ///
-    /// - Parameters:
-    ///   - scanner: The scanner with populated UTXOs and merkle trees.
-    ///   - keys: The wallet's key set.
-    ///   - tokenHash: The Poseidon hash of the token to spend.
-    ///   - amount: The amount to unshield (in token's smallest unit).
-    ///   - recipientNPK: Note public key for the recipient (for unshield, derived from recipient address).
-    ///   - changeNPK: Note public key for the change output (derived from our wallet).
+    /// The bridge method handles output notes, encryption, and signing.
+    /// We just provide selected UTXOs with merkle proofs.
     public static func assembleUnshield(
         scanner: Scanner,
-        keys: RailgunKeyDerivation.KeySet,
-        tokenHash: BigUInt,
-        amount: BigUInt,
-        recipientNPK: BigUInt,
-        changeNPK: BigUInt
+        tokenAddress: String,
+        amount: BigUInt
     ) throws -> ProofInputs {
-        // Select UTXOs
+        // Token hash for ERC20 is the address as a BigUInt (zero-padded to 32 bytes)
+        let addrHex = tokenAddress.lowercased().hasPrefix("0x")
+            ? String(tokenAddress.lowercased().dropFirst(2))
+            : tokenAddress.lowercased()
+        let tokenHash = BigUInt(addrHex, radix: 16) ?? 0
+
         let selected = try selectUTXOs(
             from: scanner.utxos,
             tokenHash: tokenHash,
             amount: amount
         )
 
-        let totalIn = selected.reduce(BigUInt(0)) { $0 + $1.value }
-        let change = totalIn - amount
-
-        // All selected UTXOs must be in the same tree
         guard let tree = selected.first?.tree else {
             throw Error.noSpendableUTXOs
         }
 
-        // Build input data with merkle proofs
-        var inputUTXOs = [ProofInputs.InputUTXO]()
-        var nullifiers = [BigUInt]()
+        // Build the tree lazily (needed for merkle proofs)
+        scanner.buildTreesIfNeeded()
 
+        var inputUTXOs = [ProofInputs.InputUTXO]()
         for utxo in selected {
             guard let proof = scanner.merkleProof(for: utxo) else {
                 throw Error.merkleProofUnavailable(tree: utxo.tree, position: utxo.position)
             }
-
             inputUTXOs.append(ProofInputs.InputUTXO(
                 random: BigUInt(utxo.random),
                 value: utxo.value,
                 pathElements: proof.elements,
-                leafIndex: BigUInt(utxo.position)
+                leafIndex: BigUInt(utxo.position),
+                commitmentHash: BigUInt(utxo.hash)
             ))
-
-            let nullifier = Poseidon.hash([keys.nullifyingKey, BigUInt(utxo.position)])
-            nullifiers.append(nullifier)
         }
 
-        // Build outputs
-        var outputs = [ProofInputs.OutputNote]()
-
-        // Recipient output
-        let recipientCommitment = Poseidon.hash([recipientNPK, tokenHash, amount])
-        outputs.append(ProofInputs.OutputNote(
-            notePublicKey: recipientNPK,
-            value: amount
-        ))
-
-        // Change output (if any)
-        var commitmentsOut = [recipientCommitment]
-        if change > 0 {
-            let changeCommitment = Poseidon.hash([changeNPK, tokenHash, change])
-            outputs.append(ProofInputs.OutputNote(
-                notePublicKey: changeNPK,
-                value: change
-            ))
-            commitmentsOut.append(changeCommitment)
-        }
-
-        // Merkle root from the spending tree
-        let merkleRoot = scanner.merkleRoot(forTree: tree)
+        let merkleRoot = scanner.treeRoot(forTree: tree)
 
         return ProofInputs(
-            tokenHash: tokenHash,
-            spendingPublicKey: keys.spendingPublicKey,
-            nullifyingKey: keys.nullifyingKey,
-            inputs: inputUTXOs,
-            outputs: outputs,
+            tokenAddress: tokenAddress,
+            amount: amount,
+            treeNumber: tree,
             merkleRoot: merkleRoot,
-            nullifiers: nullifiers,
-            commitmentsOut: commitmentsOut
+            inputs: inputUTXOs
         )
     }
 
     /// Select UTXOs to cover `amount` for a given token.
-    /// Uses a simple greedy approach: sort by value descending, take until covered.
-    static func selectUTXOs(
+    public static func selectUTXOs(
         from utxos: [UTXO],
         tokenHash: BigUInt,
         amount: BigUInt
@@ -189,22 +141,22 @@ extension Scanner {
 // MARK: - JSON Serialization for Bridge Transport
 
 extension ProofInputs {
-    /// Serialize to a dictionary suitable for JSON transport to the Node.js bridge.
-    /// All BigUInt values are converted to hex strings.
+    /// Serialize to the format expected by `generateUnshieldProofNative` bridge method.
     public func toBridgeJSON() -> [String: Any] {
         [
-            "tokenAddress": hexStr(tokenHash),
-            "publicKey": [hexStr(spendingPublicKey.x), hexStr(spendingPublicKey.y)],
-            "nullifyingKey": hexStr(nullifyingKey),
-            "randomIn": inputs.map { hexStr($0.random) },
-            "valueIn": inputs.map { hexStr($0.value) },
-            "pathElements": inputs.map { $0.pathElements.map { hexStr($0) } },
-            "leavesIndices": inputs.map { hexStr($0.leafIndex) },
-            "npkOut": outputs.map { hexStr($0.notePublicKey) },
-            "valueOut": outputs.map { hexStr($0.value) },
+            "tokenAddress": tokenAddress,
+            "amount": String(amount),
+            "treeNumber": treeNumber,
             "merkleRoot": hexStr(merkleRoot),
-            "nullifiers": nullifiers.map { hexStr($0) },
-            "commitmentsOut": commitmentsOut.map { hexStr($0) },
+            "utxos": inputs.map { utxo in
+                [
+                    "value": hexStr(utxo.value),
+                    "random": hexStr(utxo.random),
+                    "leafIndex": Int(utxo.leafIndex),
+                    "pathElements": utxo.pathElements.map { hexStr($0) },
+                    "commitmentHash": hexStr(utxo.commitmentHash),
+                ] as [String: Any]
+            },
         ]
     }
 

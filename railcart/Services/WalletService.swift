@@ -8,6 +8,8 @@
 
 import Foundation
 import SwiftUI
+import RailcartCrypto
+import BigInt
 import RailcartChain
 import BigInt
 
@@ -675,6 +677,71 @@ final class LiveWalletService: WalletServiceProtocol {
         if let firstUrl = result.providerUrls?.first, let url = URL(string: firstUrl) {
             rpcClients[chainName] = RPCClient(url: url)
         }
+    }
+
+    // MARK: - Native Unshield (uses Swift scanner, bypasses SDK scanning)
+
+    func unshieldWithNativeScanner(
+        chainName: String,
+        walletID: String,
+        encryptionKey: String,
+        toAddress: String,
+        tokenAddress: String,
+        amount: String,
+        privateKey: String,
+        nativeScanner: NativeScannerService,
+        onProofProgress: @escaping @Sendable (Double) -> Void,
+        onStatusUpdate: (@Sendable (String) -> Void)? = nil
+    ) async throws -> String {
+        // Listen for proof progress events from the bridge
+        bridge.onEvent("proofProgress") { data in
+            if let dict = data as? [String: Any],
+               let progress = dict["progress"] as? Double {
+                onProofProgress(min(max(progress, 0), 1))
+            }
+        }
+
+        // Assemble proof inputs from native scanner
+        guard let scanner = nativeScanner.getScanner(walletID: walletID, chainName: chainName) else {
+            throw NSError(domain: "NativeUnshield", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scanner not initialized"])
+        }
+
+        onStatusUpdate?("Building merkle tree...")
+        scanner.onTreeBuildProgress = { @Sendable (inserted, total) in
+            onStatusUpdate?("Building merkle tree: \(inserted)/\(total)")
+        }
+
+        let proofInputs = try await Task.detached(priority: .userInitiated) {
+            try ProofAssembler.assembleUnshield(
+                scanner: scanner,
+                tokenAddress: tokenAddress,
+                amount: BigUInt(amount) ?? 0
+            )
+        }.value
+
+        onStatusUpdate?("Generating zero-knowledge proof...")
+
+        // Build bridge params from proof inputs + wallet/chain info
+        var bridgeParams = proofInputs.toBridgeJSON()
+        bridgeParams["chainName"] = chainName
+        bridgeParams["railgunWalletID"] = walletID
+        bridgeParams["encryptionKey"] = encryptionKey
+        bridgeParams["toAddress"] = toAddress
+        bridgeParams["sendWithPublicWallet"] = true
+
+        // Generate proof and build transaction in one bridge call (no cache handoff)
+        let result = try await bridge.call(
+            "generateUnshieldProofNative",
+            params: bridgeParams,
+            as: ShieldTransactionResponse.self,
+            timeout: .seconds(300)
+        )
+
+        return try await signAndSend(
+            chainName: chainName,
+            privateKey: privateKey,
+            txData: result.transaction
+        )
     }
 
     // MARK: - Broadcaster Unshield

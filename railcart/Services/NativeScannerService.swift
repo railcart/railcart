@@ -199,6 +199,16 @@ final class NativeScannerService {
         keySets[walletID] != nil
     }
 
+    /// Access the scanner for a wallet+chain (for proof assembly).
+    func getScanner(walletID: String, chainName: String) -> RailcartCrypto.Scanner? {
+        scanners["\(walletID):\(chainName)"]
+    }
+
+    /// Access the key set for a wallet (for proof assembly).
+    func getKeySet(walletID: String) -> RailgunKeyDerivation.KeySet? {
+        keySets[walletID]
+    }
+
     /// Clear saved scan state and in-memory scanners, forcing a full rescan from block 0.
     func clearSavedState(walletIDs: [String], chainName: String) {
         for walletID in walletIDs {

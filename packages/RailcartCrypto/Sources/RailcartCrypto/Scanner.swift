@@ -69,6 +69,8 @@ public final class Scanner: @unchecked Sendable {
                 processTransact(tc)
             case .shield(let sc):
                 processShield(sc)
+            case .opaque:
+                break // Can't decrypt but hash is already in pendingLeaves for the merkle tree
             }
 
             processed += 1
@@ -229,33 +231,50 @@ public final class Scanner: @unchecked Sendable {
         treesBuilt = false
     }
 
+    /// Progress callback for tree building: (insertedLeaves, totalLeaves).
+    public var onTreeBuildProgress: (@Sendable (Int, Int) -> Void)?
+
     /// Build merkle trees from all pending leaves. Called lazily before proof generation.
     /// This is expensive (Poseidon hashing) so it's deferred from the scan phase.
     func buildTreesIfNeeded() {
         guard !treesBuilt else { return }
 
+        let totalLeaves = pendingLeaves.values.reduce(0) { $0 + $1.count }
+        var insertedSoFar = 0
+
+        let chunkSize = 500
+
         for (treeNumber, leaves) in pendingLeaves {
             var tree = trees[treeNumber] ?? PoseidonMerkleTree()
             let sorted = leaves.sorted { $0.position < $1.position }
 
-            // Batch insert: collect hashes in order, padding gaps with zeros
-            var batch = [BigUInt]()
+            // Build full batch with gap-filling, then insert in chunks
+            var fullBatch = [BigUInt]()
             var nextExpected = tree.count
             for leaf in sorted {
-                guard leaf.position >= nextExpected else { continue } // skip duplicates
+                guard leaf.position >= nextExpected else { continue }
                 while nextExpected < leaf.position {
-                    batch.append(PoseidonMerkleTree.zeros[0])
+                    fullBatch.append(PoseidonMerkleTree.zeros[0])
                     nextExpected += 1
                 }
-                batch.append(BigUInt(leaf.hash))
+                fullBatch.append(BigUInt(leaf.hash))
                 nextExpected += 1
             }
-            if !batch.isEmpty {
-                tree.insertLeaves(batch)
+
+            // Insert in chunks for progress reporting while keeping batch efficiency
+            var offset = 0
+            while offset < fullBatch.count {
+                let end = min(offset + chunkSize, fullBatch.count)
+                let chunk = Array(fullBatch[offset..<end])
+                tree.insertLeaves(chunk)
+                insertedSoFar += chunk.count
+                onTreeBuildProgress?(insertedSoFar, totalLeaves)
+                offset = end
             }
             trees[treeNumber] = tree
         }
 
+        onTreeBuildProgress?(totalLeaves, totalLeaves)
         pendingLeaves.removeAll()
         treesBuilt = true
     }
@@ -293,6 +312,8 @@ public final class Scanner: @unchecked Sendable {
             return (tc.utxoTree, tc.utxoIndex, tc.hash)
         case .shield(let sc):
             return (sc.utxoTree, sc.utxoIndex, sc.hash)
+        case .opaque(let hash, let tree, let index, _):
+            return (tree, index, hash)
         }
     }
 
@@ -300,6 +321,7 @@ public final class Scanner: @unchecked Sendable {
         switch commitment {
         case .transact(let tc): return tc.blockNumber
         case .shield(let sc): return sc.blockNumber
+        case .opaque(_, _, _, let blockNumber): return blockNumber
         }
     }
 }

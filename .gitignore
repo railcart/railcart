@@ -1,6 +1,8 @@
 # Bundled Node.js binary (downloaded via scripts/setup-node.sh)
 vendor/node/
 
+config-example.json
+
 # Xcode
 xcuserdata/
 *.xcscmblueprint
@@ -11,6 +13,7 @@ DerivedData/
 
 # other build caches
 packages/***/.build
+packages/***/PLAN.md
 
 # release signing
 scripts/release/
