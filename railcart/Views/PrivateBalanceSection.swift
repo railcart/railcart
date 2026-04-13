@@ -52,6 +52,7 @@ struct PrivateBalanceSection: View {
                             .font(.caption.monospaced())
                             .foregroundStyle(.secondary)
                     }
+                    .animation(.easeInOut(duration: 0.3), value: scanProgress)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -74,15 +75,7 @@ struct PrivateBalanceSection: View {
                         tokenBalances.first { $0.tokenAddress.lowercased() == addr.lowercased() }?.amount
                     }
                     let displayBalance = balance ?? (hasSynced ? "0" : nil)
-                    // Only WETH supports unshield-to-ETH today (base token path).
-                    let isWETH = token.symbol == "WETH"
-                    let state: TokenActionState = if !isWETH {
-                        .unsupported
-                    } else if hasNonZero(displayBalance) {
-                        .enabled
-                    } else {
-                        .zeroBalance
-                    }
+                    let state: TokenActionState = hasNonZero(displayBalance) ? .enabled : .zeroBalance
                     TokenRow(
                         token: token,
                         balance: displayBalance,

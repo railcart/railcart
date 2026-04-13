@@ -236,7 +236,8 @@ struct WalletSetupView: View {
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
-                name: "Wallet 1"
+                name: "Wallet 1",
+                creationBlockNumbers: creationBlocks
             )
             let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,

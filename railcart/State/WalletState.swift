@@ -160,7 +160,8 @@ final class WalletState {
                 id: walletInfo.id,
                 derivationIndex: walletInfo.derivationIndex,
                 railgunAddress: walletInfo.railgunAddress,
-                name: "Wallet \(index + 1)"
+                name: "Wallet \(index + 1)",
+                creationBlockNumbers: creationBlocks
             )
             let unlocked = Wallet.Unlocked(
                 ethAddress: walletInfo.ethAddress,

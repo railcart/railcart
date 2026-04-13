@@ -213,8 +213,7 @@ struct WalletDetailView: View {
         guard let balanceService else { return }
         let chain = network.selectedChain.rawValue
         balanceService.invalidateAllPrivateBalances(chainName: chain)
-        let walletIDs = walletState.wallets.map(\.id)
-        await balanceService.scanAllPrivateBalances(chainName: chain, walletIDs: walletIDs)
+        await balanceService.scanAllPrivateBalances(chainName: chain, wallets: walletState.wallets)
     }
 
     /// Look up the public balance (in wei / smallest unit) for a token.

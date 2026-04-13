@@ -220,7 +220,7 @@ struct ShieldSheet: View {
                 )
             }
             resultTxHash = txHash
-            statusMessage = nil
+            statusMessage = "Waiting for confirmation..."
             transactionStore.record(Transaction(
                 id: UUID().uuidString,
                 action: .shield,
@@ -233,7 +233,10 @@ struct ShieldSheet: View {
                 fromAddress: unlocked.ethAddress,
                 toAddress: railgunAddress
             ))
+            // Wait for the shield tx to confirm, then refresh balances
             let chain = network.selectedChain.rawValue
+            try? await service.waitForTransaction(chainName: chain, txHash: txHash)
+            statusMessage = nil
             balanceService?.invalidateEthBalance(chainName: chain, address: unlocked.ethAddress)
             balanceService?.invalidateERC20Balances(chainName: chain, address: unlocked.ethAddress)
             balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
@@ -267,12 +270,14 @@ struct ShieldSheet: View {
         // Step 2: Approve if needed
         if currentAllowance < neededAmount {
             statusMessage = "Approving \(token.symbol) for shielding..."
-            _ = try await service.approveERC20ForShield(
+            let approveTxHash = try await service.approveERC20ForShield(
                 chainName: chainName,
                 tokenAddress: tokenAddress,
                 amount: nil, // max approval
                 privateKey: unlocked.ethPrivateKey
             )
+            statusMessage = "Waiting for approval to confirm..."
+            try await service.waitForTransaction(chainName: chainName, txHash: approveTxHash)
         }
 
         // Step 3: Shield

@@ -78,6 +78,12 @@ struct MockWalletService: WalletServiceProtocol {
         BroadcasterFeeEstimate(gasEstimate: "1500000", broadcasterFeeAmount: "150000000000000", gasPrice: "30000000000")
     }
     func unshieldBaseTokenViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+    func unshieldERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+    func estimateBroadcasterFeeERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, feePerUnitGas: String, feeTokenAddress: String) async throws -> BroadcasterFeeEstimate {
+        BroadcasterFeeEstimate(gasEstimate: "1500000", broadcasterFeeAmount: "150000000000000", gasPrice: "30000000000")
+    }
+    func unshieldERC20ViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+    func waitForTransaction(chainName: String, txHash: String) async throws {}
 
     func loadChainProvider(chainName: String, providerUrl: String) async throws {}
     func loadChainProviderFromRemoteConfig(chainName: String) async throws {}

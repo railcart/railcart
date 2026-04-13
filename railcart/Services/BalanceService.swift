@@ -24,6 +24,7 @@ private struct CacheEntry<T> {
 @Observable
 final class BalanceService {
     private let walletService: any WalletServiceProtocol
+    let nativeScanner: NativeScannerService
 
     private static let publicTTL: TimeInterval = 300      // 5 minutes
     private static let privateTTL: TimeInterval = 1800     // 30 minutes
@@ -57,6 +58,7 @@ final class BalanceService {
 
     init(walletService: any WalletServiceProtocol) {
         self.walletService = walletService
+        self.nativeScanner = NativeScannerService()
     }
 
     // MARK: - Public ETH Balance
@@ -106,7 +108,8 @@ final class BalanceService {
     /// If a scan is already in flight for this chain, awaits that scan instead.
     /// Scans run serially — concurrent merkletree rescans overload the node process.
     /// Automatically sets up scan UI state; callers don't need to call beginScanUI.
-    func scanAllPrivateBalances(chainName: String, walletIDs: [String]) async {
+    func scanAllPrivateBalances(chainName: String, wallets: [Wallet]) async {
+        let walletIDs = wallets.map(\.id)
         // If a scan is already in flight for this chain, wait for it
         if let existing = inFlightScans[chainName] {
             AppLogger.shared.log("sync", "Joining in-flight scan for \(chainName)")
@@ -123,27 +126,45 @@ final class BalanceService {
         beginScanUI(chainName: chainName)
 
         let task = Task {
-            AppLogger.shared.log("sync", "Starting private balance sync for \(chainName) (\(walletIDs.count) wallets)")
-            do {
-                try await walletService.scanBalances(chainName: chainName, walletIDs: walletIDs)
-                for walletID in walletIDs {
-                    let balances = try await walletService.getPrivateBalances(chainName: chainName, walletID: walletID)
-                    let key = "\(chainName):\(walletID)"
-                    privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+            AppLogger.shared.log("sync", "Starting native private balance sync for \(chainName) (\(walletIDs.count) wallets)")
+
+            // Initialize native scanner for any wallets that haven't been set up yet
+            for wallet in wallets {
+                if !nativeScanner.isInitialized(walletID: wallet.id) {
+                    await initializeNativeScanner(wallet: wallet)
                 }
-                AppLogger.shared.log("sync", "Private balance sync complete for \(chainName)")
-            } catch {
-                AppLogger.shared.log("error", "Private balance sync failed for \(chainName): \(error.localizedDescription)")
             }
+
+            // Observe native scanner progress and forward to our scan UI state
+            let progressTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                while !Task.isCancelled {
+                    if let progress = self.nativeScanner.scanProgress {
+                        self.scanStep = progress.status
+                        self.scanProgress = progress.progress
+                    }
+                    try? await Task.sleep(for: .milliseconds(100))
+                }
+            }
+
+            await nativeScanner.scanAllWallets(chainName: chainName, walletIDs: walletIDs)
+            progressTask.cancel()
+
+            // Cache results from native scanner
+            for walletID in walletIDs {
+                let balances = nativeScanner.getPrivateBalances(chainName: chainName, walletID: walletID)
+                let key = "\(chainName):\(walletID)"
+                privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+            }
+
+            AppLogger.shared.log("sync", "Native private balance sync complete for \(chainName)")
 
             inFlightScans.removeValue(forKey: chainName)
             lastProgress.removeValue(forKey: chainName)
             if inFlightScans[chainName] == nil {
-                // This was the last scan to finish; clear the active slot
                 activeScanTask = nil
             }
 
-            // Only clear scan UI state if this chain is still the displayed one
             if scanningChain == chainName {
                 isScanning = false
                 scanStep = nil
@@ -159,16 +180,6 @@ final class BalanceService {
     /// Whether all wallets on a chain have fresh cached private balances.
     func hasAllPrivateBalances(chainName: String, walletIDs: [String]) -> Bool {
         walletIDs.allSatisfy { cachedPrivateBalances(chainName: chainName, walletID: $0) != nil }
-    }
-
-    /// Update scan progress from external events.
-    func updateScanProgress(step: String?, progress: Double) {
-        guard isScanning, let scanningChain else { return }
-        let changed = (step != nil && step != scanStep) || progress != scanProgress
-        guard changed else { return }
-        if let step { scanStep = step }
-        scanProgress = progress
-        lastProgress[scanningChain] = (step: scanStep, progress: scanProgress)
     }
 
     /// Incremented each time a new scan starts; listeners use this to reset their state.
@@ -219,6 +230,28 @@ final class BalanceService {
         ethBalanceCache = ethBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
         erc20BalanceCache = erc20BalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
         privateBalanceCache = privateBalanceCache.filter { !$0.key.hasPrefix("\(chainName):") }
+    }
+
+    /// Initialize the native scanner for a wallet by fetching its mnemonic.
+    func initializeNativeScanner(wallet: Wallet) async {
+        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+            AppLogger.shared.log("native-scan", "Cannot init scanner: no encryption key")
+            return
+        }
+        do {
+            let mnemonic = try await walletService.getWalletMnemonic(
+                encryptionKey: encryptionKey, walletID: wallet.id
+            )
+            await nativeScanner.initializeWallet(
+                walletID: wallet.id,
+                mnemonic: mnemonic,
+                derivationIndex: wallet.derivationIndex,
+                creationBlockNumbers: wallet.creationBlockNumbers
+            )
+            AppLogger.shared.log("native-scan", "Initialized native scanner for wallet \(wallet.id.prefix(8))...")
+        } catch {
+            AppLogger.shared.log("native-scan", "Failed to init scanner for wallet: \(error.localizedDescription)")
+        }
     }
 
     func invalidateAll() {

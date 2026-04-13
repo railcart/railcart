@@ -98,6 +98,18 @@ struct RailcartApp: App {
                 .keyboardShortcut("i", modifiers: [.command, .shift])
                 .disabled(walletState.step != .ready)
             }
+            CommandGroup(after: .newItem) {
+                Divider()
+                Button("Full Balance Rescan") {
+                    Task {
+                        guard let bs = balanceService as BalanceService? else { return }
+                        bs.nativeScanner.clearSavedState(walletIDs: walletState.wallets.map(\.id), chainName: networkState.selectedChain.rawValue)
+                        bs.invalidateAllPrivateBalances(chainName: networkState.selectedChain.rawValue)
+                        await bs.scanAllPrivateBalances(chainName: networkState.selectedChain.rawValue, wallets: walletState.wallets)
+                    }
+                }
+                .disabled(walletState.step != .ready || (balanceService.isScanning))
+            }
             CommandGroup(after: .appInfo) {
                 Button("Check for Updates…") {
                     updateController.checkForUpdates()

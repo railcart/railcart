@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		D0A63CAF2F74A8DE0032498D /* RailcartChain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A63CAE2F74A8DE0032498D /* RailcartChain */; };
 		D0CHAIN032F71C5D50008E08D /* (null) in Frameworks */ = {isa = PBXBuildFile; };
+		D0CRYPTO0100000000000001 /* RailcartCrypto in Frameworks */ = {isa = PBXBuildFile; productRef = D0CRYPTO0100000000000003 /* RailcartCrypto */; };
 		D0SPARKLE0100000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = D0SPARKLE0100000000000003 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -59,6 +60,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D0A63CAF2F74A8DE0032498D /* RailcartChain in Frameworks */,
+				D0CRYPTO0100000000000001 /* RailcartCrypto in Frameworks */,
 				D0SPARKLE0100000000000001 /* Sparkle in Frameworks */,
 				D0CHAIN032F71C5D50008E08D /* (null) in Frameworks */,
 			);
@@ -131,6 +133,7 @@
 			name = railcart;
 			packageProductDependencies = (
 				D0A63CAE2F74A8DE0032498D /* RailcartChain */,
+				D0CRYPTO0100000000000003 /* RailcartCrypto */,
 				D0SPARKLE0100000000000003 /* Sparkle */,
 			);
 			productName = railcart;
@@ -217,6 +220,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */,
+				D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */,
 				D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -629,6 +633,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = packages/RailcartChain;
 		};
+		D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = packages/RailcartCrypto;
+		};
 		D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = vendor/Sparkle;
@@ -640,6 +648,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */;
 			productName = RailcartChain;
+		};
+		D0CRYPTO0100000000000003 /* RailcartCrypto */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */;
+			productName = RailcartCrypto;
 		};
 		D0SPARKLE0100000000000003 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;

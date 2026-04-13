@@ -156,7 +156,6 @@ struct ContentView: View {
             WalletSetupView()
                 .interactiveDismissDisabled()
         }
-        .task { listenForScanEvents() }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             walletState.handleAppActivation()
         }
@@ -201,33 +200,6 @@ struct ContentView: View {
         }
     }
 
-    private func listenForScanEvents() {
-        bridge.onEvent("scanProgress") { data in
-            guard let dict = data as? [String: Any],
-                  let balanceService else { return }
-            let status = dict["scanStatus"] as? String
-            let type = dict["type"] as? String
-            let progress = dict["progress"] as? Double
-            let eventChainId = dict["chainId"] as? Int
-            Task { @MainActor in
-                guard balanceService.isScanning else { return }
-                // Ignore events from a chain we're not currently displaying
-                if let eventChainId, eventChainId != network.selectedChain.chainId { return }
-                var step: String?
-                if let status, let type {
-                    step = switch status {
-                    case "Started": "Scanning \(type) merkletree..."
-                    case "Updated": "Syncing \(type) merkletree..."
-                    case "Complete": "\(type) merkletree complete"
-                    default: "Scanning..."
-                    }
-                }
-                let overall = min(progress ?? 0, 1.0)
-                balanceService.updateScanProgress(step: step, progress: overall)
-            }
-        }
-    }
-
     private func syncPrivateBalances() async {
         guard walletState.step == .ready, let balanceService else { return }
         let chain = network.selectedChain
@@ -240,7 +212,7 @@ struct ContentView: View {
             AppLogger.shared.log("sync", "Skipping private balance sync — no provider for \(chain.rawValue)")
             return
         }
-        await balanceService.scanAllPrivateBalances(chainName: chain.rawValue, walletIDs: walletIDs)
+        await balanceService.scanAllPrivateBalances(chainName: chain.rawValue, wallets: walletState.wallets)
     }
 
 }

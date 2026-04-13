@@ -12,6 +12,9 @@ struct Wallet: Codable, Identifiable, Sendable {
     let derivationIndex: Int     // BIP-44 index (0, 1, 2, ...)
     let railgunAddress: String   // 0zk privacy address
     var name: String             // user-editable label
+    /// Block numbers at wallet creation time, per chain name.
+    /// Used to skip scanning before the wallet existed.
+    var creationBlockNumbers: [String: Int]?
 
     /// In-memory only (not persisted). Populated on unlock.
     struct Unlocked: Sendable {

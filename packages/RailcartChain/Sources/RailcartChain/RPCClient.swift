@@ -72,6 +72,18 @@ public struct RPCClient: Sendable {
         try await call("eth_sendRawTransaction", params: [signedTx.hex])
     }
 
+    /// Poll until a transaction is mined. Returns once `eth_getTransactionReceipt`
+    /// returns a non-null result, or throws after `timeout` seconds.
+    public func waitForReceipt(txHash: String, timeout: TimeInterval = 120, pollInterval: TimeInterval = 2) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let receipt: TransactionReceipt? = try? await callOptional("eth_getTransactionReceipt", params: [txHash])
+            if receipt != nil { return }
+            try await Task.sleep(for: .seconds(pollInterval))
+        }
+        throw RPCError.receiptTimeout(txHash)
+    }
+
     /// Get the chain ID.
     public func getChainId() async throws -> BigUInt {
         let result: String = try await call("eth_chainId", params: [String]())
@@ -79,6 +91,27 @@ public struct RPCClient: Sendable {
     }
 
     // MARK: - Private
+
+    /// Like `call` but returns nil when the RPC result is JSON `null`.
+    private func callOptional<P: Encodable, R: Decodable>(_ method: String, params: P) async throws -> R? {
+        let body = JSONRPCRequest(method: method, params: params)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+            throw RPCError.httpError(http.statusCode, method: method, url: url.host ?? url.absoluteString)
+        }
+
+        let rpcResponse = try JSONDecoder().decode(JSONRPCResponse<R>.self, from: data)
+        if let error = rpcResponse.error {
+            throw RPCError.rpcError(code: error.code, message: error.message)
+        }
+        return rpcResponse.result
+    }
 
     private func call<P: Encodable, R: Decodable>(_ method: String, params: P) async throws -> R {
         let body = JSONRPCRequest(method: method, params: params)
@@ -135,12 +168,18 @@ private struct BlockResult: Decodable {
     let baseFeePerGas: String?
 }
 
+private struct TransactionReceipt: Decodable {
+    let transactionHash: String
+    let status: String?
+}
+
 public enum RPCError: LocalizedError, Sendable {
     case invalidURL(String)
     case httpError(Int, method: String, url: String)
     case rpcError(code: Int, message: String)
     case noResult
     case invalidHex(String)
+    case receiptTimeout(String)
 
     public var errorDescription: String? {
         switch self {
@@ -149,6 +188,7 @@ public enum RPCError: LocalizedError, Sendable {
         case .rpcError(_, let message): "RPC error: \(message)"
         case .noResult: "No result from RPC"
         case .invalidHex(let hex): "Invalid hex value: \(hex)"
+        case .receiptTimeout(let txHash): "Transaction not confirmed after timeout: \(txHash)"
         }
     }
 }

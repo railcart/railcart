@@ -142,7 +142,7 @@ struct ReplaceCoreMnemonicView: View {
                 try? await network.ensureProviderLoaded(for: chain, using: service)
                 await balanceService.scanAllPrivateBalances(
                     chainName: chain.rawValue,
-                    walletIDs: [newWallet.id]
+                    wallets: [newWallet]
                 )
             }
         } catch {

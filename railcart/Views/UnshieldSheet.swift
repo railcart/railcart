@@ -2,7 +2,8 @@
 //  UnshieldSheet.swift
 //  railcart
 //
-//  Compact sheet to unshield a base token (private WETH → ETH at any address).
+//  Sheet to unshield a token (private → public at any address).
+//  Supports base token (WETH → ETH) and ERC-20 tokens.
 //  Supports direct unshield (user pays gas) or broadcaster-mediated (no gas needed).
 //
 
@@ -40,6 +41,13 @@ struct UnshieldSheet: View {
     @State private var feeEstimate: BroadcasterFeeEstimate?
     @State private var currentStep: BroadcasterUnshieldStep?
     @State private var completedSteps: Set<String> = []
+    /// The token address used for broadcaster fees (may differ from the unshielded token
+    /// if no broadcasters support that token and we fell back to WETH).
+    @State private var resolvedFeeTokenAddress: String?
+    /// Background task that continuously polls for broadcaster updates.
+    @State private var broadcasterPollTask: Task<Void, Never>?
+    /// When the broadcaster search started, so we show "searching" for at least 20s.
+    @State private var broadcasterSearchStarted: Date?
 
     enum BroadcasterPhase {
         case idle
@@ -47,6 +55,9 @@ struct UnshieldSheet: View {
         case selectBroadcaster
         case executing
     }
+
+    /// True for ERC-20 tokens; false for ETH (base token, uses WETH unwrap path).
+    private var isERC20: Bool { token.symbol != "ETH" }
 
     private var sendingToSelf: Bool {
         destination.lowercased() == unlocked.ethAddress.lowercased() && !destination.isEmpty
@@ -156,6 +167,12 @@ struct UnshieldSheet: View {
         }
         .padding(20)
         .frame(width: 500)
+        .onDisappear {
+            broadcasterPollTask?.cancel()
+            if broadcasterPhase != .idle {
+                Task { try? await bridge.callRaw("stopBroadcasterSearch") }
+            }
+        }
     }
 
     // MARK: - Header
@@ -194,20 +211,35 @@ struct UnshieldSheet: View {
         case .idle:
             EmptyView()
         case .loadingBroadcasters:
-            HStack(spacing: 8) {
-                ProgressView().controlSize(.small)
-                Text("Finding broadcasters...").font(.caption).foregroundStyle(.secondary)
-            }
+            EmptyView()
         case .selectBroadcaster:
             broadcasterList
         case .executing:
-            broadcasterStepList
+            if currentStep == nil, let statusMessage {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text(statusMessage).font(.caption).foregroundStyle(.secondary)
+                }
+            } else {
+                broadcasterStepList
+            }
         }
+    }
+
+    private var isStillSearching: Bool {
+        guard broadcasters.isEmpty,
+              let started = broadcasterSearchStarted else { return false }
+        return Date().timeIntervalSince(started) < 20
     }
 
     private var broadcasterList: some View {
         VStack(alignment: .leading, spacing: 8) {
-            if broadcasters.isEmpty {
+            if broadcasters.isEmpty && isStillSearching {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Searching for broadcasters...").font(.caption).foregroundStyle(.secondary)
+                }
+            } else if broadcasters.isEmpty {
                 HStack(spacing: 8) {
                     Image(systemName: "antenna.radiowaves.left.and.right.slash")
                         .foregroundStyle(.secondary)
@@ -316,20 +348,90 @@ struct UnshieldSheet: View {
             errorMessage = "Wallet not unlocked"
             return
         }
-        guard let ethAmount = Double(amount) else {
+        guard let weiAmount = parseAmountToWei() else {
             errorMessage = "Invalid amount"
             return
         }
-        let weiAmount = String(format: "%.0f", ethAmount * 1e18)
 
         isWorking = true
         errorMessage = nil
+        statusMessage = "Syncing balances..."
+
+        do {
+            try await service.scanBalances(
+                chainName: network.selectedChain.rawValue,
+                walletIDs: [wallet.id]
+            )
+        } catch {
+            // Non-fatal
+        }
+
         proofProgress = 0
         statusMessage = "Generating zero-knowledge proof..."
 
         do {
-            let txHash = try await service.unshieldBaseToken(
+            let txHash = try await generateDirectProofAndSend(
                 chainName: network.selectedChain.rawValue,
+                encryptionKey: encryptionKey,
+                weiAmount: weiAmount
+            )
+            finishWithTxHash(txHash)
+        } catch let firstError {
+            // If proof failed due to missing UTXO commitments, do a full rescan and retry
+            if firstError.localizedDescription.contains("UTXO blinded commitments") {
+                statusMessage = "Rescanning merkle tree..."
+                proofProgress = nil
+                do {
+                    try await service.fullRescan(
+                        chainName: network.selectedChain.rawValue,
+                        walletIDs: [wallet.id]
+                    )
+                    proofProgress = 0
+                    statusMessage = "Generating zero-knowledge proof..."
+                    let txHash = try await generateDirectProofAndSend(
+                        chainName: network.selectedChain.rawValue,
+                        encryptionKey: encryptionKey,
+                        weiAmount: weiAmount
+                    )
+                    finishWithTxHash(txHash)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    statusMessage = nil
+                    proofProgress = nil
+                }
+            } else {
+                errorMessage = firstError.localizedDescription
+                statusMessage = nil
+                proofProgress = nil
+            }
+        }
+        isWorking = false
+    }
+
+    private func generateDirectProofAndSend(
+        chainName: String,
+        encryptionKey: String,
+        weiAmount: String
+    ) async throws -> String {
+        if isERC20 {
+            guard let tokenAddress = token.address(on: network.selectedChain) else {
+                throw ShieldError.noTokenAddress
+            }
+            return try await service.unshieldERC20(
+                chainName: chainName,
+                walletID: wallet.id,
+                encryptionKey: encryptionKey,
+                toAddress: destination,
+                tokenAddress: tokenAddress,
+                amount: weiAmount,
+                privateKey: unlocked.ethPrivateKey,
+                onProofProgress: { @Sendable progress in
+                    Task { @MainActor in proofProgress = progress }
+                }
+            )
+        } else {
+            return try await service.unshieldBaseToken(
+                chainName: chainName,
                 walletID: wallet.id,
                 encryptionKey: encryptionKey,
                 toAddress: destination,
@@ -339,13 +441,7 @@ struct UnshieldSheet: View {
                     Task { @MainActor in proofProgress = progress }
                 }
             )
-            finishWithTxHash(txHash)
-        } catch {
-            errorMessage = error.localizedDescription
-            statusMessage = nil
-            proofProgress = nil
         }
-        isWorking = false
     }
 
     // MARK: - Broadcaster Unshield
@@ -355,47 +451,111 @@ struct UnshieldSheet: View {
             errorMessage = "Wallet not unlocked"
             return
         }
-        guard let ethAmount = Double(amount) else {
+        guard let weiAmount = parseAmountToWei() else {
             errorMessage = "Invalid amount"
             return
         }
-        let weiAmount = String(format: "%.0f", ethAmount * 1e18)
-        guard let wrappedAddress = token.address(on: network.selectedChain) else {
-            errorMessage = "Token not supported on this chain"
-            return
+
+        // Look up broadcasters by the token being unshielded — broadcasters
+        // advertise which tokens they accept fees in.
+        let feeTokenAddress: String
+        if isERC20 {
+            guard let addr = token.address(on: network.selectedChain) else {
+                errorMessage = "Token not supported on this chain"
+                return
+            }
+            feeTokenAddress = addr
+        } else {
+            guard let wethAddr = Token.weth.address(on: network.selectedChain) else {
+                errorMessage = "Token not supported on this chain"
+                return
+            }
+            feeTokenAddress = wethAddr
         }
 
         broadcasterPhase = .loadingBroadcasters
+        broadcasterSearchStarted = Date()
         errorMessage = nil
 
         do {
             let _ = try await bridge.callRaw("startBroadcasterSearch", params: [
                 "chainName": network.selectedChain.rawValue,
             ])
-
-            let listResult = try await bridge.call("getBroadcastersForToken", params: [
-                "tokenAddress": wrappedAddress,
-                "useRelayAdapt": true,
-            ], as: BroadcasterListResponse.self)
-
-            let available = listResult.broadcasters.filter { !$0.isExpired }
-
-            if let best = available.sorted(by: { $0.reliability > $1.reliability }).first {
-                feeEstimate = try await service.estimateBroadcasterFee(
-                    chainName: network.selectedChain.rawValue,
-                    walletID: wallet.id,
-                    encryptionKey: encryptionKey,
-                    toAddress: destination,
-                    amount: weiAmount,
-                    feePerUnitGas: best.feePerUnitGas
-                )
-            }
-
-            broadcasters = available.sorted(by: { $0.reliability > $1.reliability })
-            broadcasterPhase = .selectBroadcaster
         } catch {
             errorMessage = error.localizedDescription
             broadcasterPhase = .idle
+            return
+        }
+
+        // Start continuous polling — broadcaster fees arrive async over Waku P2P
+        // and expire, so we keep refreshing as long as the sheet is open.
+        broadcasterPollTask?.cancel()
+        broadcasterPollTask = Task {
+            let chain = network.selectedChain
+            var activeFeeToken = feeTokenAddress
+            while !Task.isCancelled {
+                do {
+                    var result = try await bridge.call("getBroadcastersForToken", params: [
+                        "tokenAddress": activeFeeToken,
+                        "useRelayAdapt": true,
+                    ], as: BroadcasterListResponse.self)
+
+                    // If no broadcasters for this ERC-20, try WETH fallback
+                    if isERC20 && result.broadcasters.filter({ !$0.isExpired }).isEmpty,
+                       let wethAddr = Token.weth.address(on: chain),
+                       wethAddr.lowercased() != feeTokenAddress.lowercased() {
+                        result = try await bridge.call("getBroadcastersForToken", params: [
+                            "tokenAddress": wethAddr,
+                            "useRelayAdapt": true,
+                        ], as: BroadcasterListResponse.self)
+                        activeFeeToken = wethAddr
+                    }
+
+                    let available = result.broadcasters
+                        .filter { !$0.isExpired }
+                        .sorted { $0.reliability > $1.reliability }
+
+                    // Update fee estimate if we have broadcasters and inputs
+                    var newEstimate = feeEstimate
+                    if let best = available.first, let wei = parseAmountToWei() {
+                        if isERC20, let tokenAddr = token.address(on: chain) {
+                            newEstimate = try? await service.estimateBroadcasterFeeERC20(
+                                chainName: chain.rawValue,
+                                walletID: wallet.id,
+                                encryptionKey: encryptionKey,
+                                toAddress: destination,
+                                tokenAddress: tokenAddr,
+                                amount: wei,
+                                feePerUnitGas: best.feePerUnitGas,
+                                feeTokenAddress: activeFeeToken
+                            )
+                        } else {
+                            newEstimate = try? await service.estimateBroadcasterFee(
+                                chainName: chain.rawValue,
+                                walletID: wallet.id,
+                                encryptionKey: encryptionKey,
+                                toAddress: destination,
+                                amount: wei,
+                                feePerUnitGas: best.feePerUnitGas
+                            )
+                        }
+                    }
+
+                    broadcasters = available
+                    resolvedFeeTokenAddress = activeFeeToken
+                    if let newEstimate { feeEstimate = newEstimate }
+                    if broadcasterPhase == .loadingBroadcasters && !available.isEmpty {
+                        broadcasterPhase = .selectBroadcaster
+                    } else if broadcasterPhase == .loadingBroadcasters {
+                        // Show the empty list so the user knows we're looking
+                        broadcasterPhase = .selectBroadcaster
+                    }
+                } catch {
+                    // Don't fail the whole flow on a single poll error
+                }
+
+                try? await Task.sleep(for: .seconds(5))
+            }
         }
     }
 
@@ -404,77 +564,208 @@ struct UnshieldSheet: View {
             errorMessage = "Wallet not unlocked"
             return
         }
-        guard let ethAmount = Double(amount) else {
+        guard let weiAmount = parseAmountToWei() else {
             errorMessage = "Invalid amount"
             return
         }
-        let weiAmount = String(format: "%.0f", ethAmount * 1e18)
 
         let estimate: BroadcasterFeeEstimate
         if let existing = feeEstimate,
            let gasEst = Decimal(string: existing.gasEstimate),
            let feeRate = Decimal(string: broadcaster.feePerUnitGas) {
             let fee = gasEst * feeRate
+            let handler = NSDecimalNumberHandler(
+                roundingMode: .up, scale: 0,
+                raiseOnExactness: false, raiseOnOverflow: false,
+                raiseOnUnderflow: false, raiseOnDivideByZero: false
+            )
+            let feeStr = NSDecimalNumber(decimal: fee)
+                .rounding(accordingToBehavior: handler).stringValue
             estimate = BroadcasterFeeEstimate(
                 gasEstimate: existing.gasEstimate,
-                broadcasterFeeAmount: "\(fee)",
+                broadcasterFeeAmount: feeStr,
                 gasPrice: existing.gasPrice
             )
         } else {
             do {
-                estimate = try await service.estimateBroadcasterFee(
-                    chainName: network.selectedChain.rawValue,
-                    walletID: wallet.id,
-                    encryptionKey: encryptionKey,
-                    toAddress: destination,
-                    amount: weiAmount,
-                    feePerUnitGas: broadcaster.feePerUnitGas
-                )
+                if isERC20 {
+                    guard let tokenAddress = token.address(on: network.selectedChain),
+                          let feeAddr = resolvedFeeTokenAddress else {
+                        errorMessage = "Token not supported on this chain"
+                        return
+                    }
+                    estimate = try await service.estimateBroadcasterFeeERC20(
+                        chainName: network.selectedChain.rawValue,
+                        walletID: wallet.id,
+                        encryptionKey: encryptionKey,
+                        toAddress: destination,
+                        tokenAddress: tokenAddress,
+                        amount: weiAmount,
+                        feePerUnitGas: broadcaster.feePerUnitGas,
+                        feeTokenAddress: feeAddr
+                    )
+                } else {
+                    estimate = try await service.estimateBroadcasterFee(
+                        chainName: network.selectedChain.rawValue,
+                        walletID: wallet.id,
+                        encryptionKey: encryptionKey,
+                        toAddress: destination,
+                        amount: weiAmount,
+                        feePerUnitGas: broadcaster.feePerUnitGas
+                    )
+                }
             } catch {
                 errorMessage = error.localizedDescription
                 return
             }
         }
 
+        broadcasterPollTask?.cancel()
         broadcasterPhase = .executing
         errorMessage = nil
+        statusMessage = "Syncing balances..."
 
         do {
-            let txHash = try await service.unshieldBaseTokenViaBroadcaster(
+            try await service.scanBalances(
                 chainName: network.selectedChain.rawValue,
-                walletID: wallet.id,
-                encryptionKey: encryptionKey,
-                toAddress: destination,
-                amount: weiAmount,
-                broadcaster: broadcaster,
-                feeEstimate: estimate,
-                onStep: { @Sendable step in
-                    Task { @MainActor in
-                        if let prev = currentStep { completedSteps.insert("\(prev)") }
-                        currentStep = step
-                        if step != .generatingProof { proofProgress = nil }
-                    }
-                },
-                onProofProgress: { @Sendable progress in
-                    Task { @MainActor in proofProgress = progress }
-                }
+                walletIDs: [wallet.id]
             )
+        } catch {
+            // Non-fatal
+        }
+
+        let progressHandler: @Sendable (BroadcasterUnshieldStep) -> Void = { @Sendable step in
+            Task { @MainActor in
+                if let prev = currentStep { completedSteps.insert("\(prev)") }
+                currentStep = step
+                if step != .generatingProof { proofProgress = nil }
+            }
+        }
+        let proofHandler: @Sendable (Double) -> Void = { @Sendable progress in
+            Task { @MainActor in proofProgress = progress }
+        }
+
+        do {
+            let txHash: String
+            if isERC20 {
+                guard let tokenAddress = token.address(on: network.selectedChain),
+                      let feeAddr = resolvedFeeTokenAddress else {
+                    errorMessage = "Token not supported on this chain"
+                    broadcasterPhase = .idle
+                    return
+                }
+                txHash = try await service.unshieldERC20ViaBroadcaster(
+                    chainName: network.selectedChain.rawValue,
+                    walletID: wallet.id,
+                    encryptionKey: encryptionKey,
+                    toAddress: destination,
+                    tokenAddress: tokenAddress,
+                    amount: weiAmount,
+                    broadcaster: broadcaster,
+                    feeEstimate: estimate,
+                    feeTokenAddress: feeAddr,
+                    onStep: progressHandler,
+                    onProofProgress: proofHandler
+                )
+            } else {
+                txHash = try await service.unshieldBaseTokenViaBroadcaster(
+                    chainName: network.selectedChain.rawValue,
+                    walletID: wallet.id,
+                    encryptionKey: encryptionKey,
+                    toAddress: destination,
+                    amount: weiAmount,
+                    broadcaster: broadcaster,
+                    feeEstimate: estimate,
+                    onStep: progressHandler,
+                    onProofProgress: proofHandler
+                )
+            }
             if let prev = currentStep { completedSteps.insert("\(prev)") }
             finishWithTxHash(txHash)
-        } catch {
-            errorMessage = error.localizedDescription
-            broadcasterPhase = .idle
-            currentStep = nil
-            completedSteps = []
-            proofProgress = nil
+        } catch let firstError {
+            if firstError.localizedDescription.contains("UTXO blinded commitments") {
+                // Full rescan and retry
+                currentStep = nil
+                completedSteps = []
+                proofProgress = nil
+                statusMessage = "Rescanning merkle tree..."
+                do {
+                    try await service.fullRescan(
+                        chainName: network.selectedChain.rawValue,
+                        walletIDs: [wallet.id]
+                    )
+                    statusMessage = nil
+                    let retryHash: String
+                    if isERC20 {
+                        guard let tokenAddress = token.address(on: network.selectedChain),
+                              let feeAddr = resolvedFeeTokenAddress else {
+                            errorMessage = "Token not supported on this chain"
+                            broadcasterPhase = .idle
+                            return
+                        }
+                        retryHash = try await service.unshieldERC20ViaBroadcaster(
+                            chainName: network.selectedChain.rawValue,
+                            walletID: wallet.id,
+                            encryptionKey: encryptionKey,
+                            toAddress: destination,
+                            tokenAddress: tokenAddress,
+                            amount: weiAmount,
+                            broadcaster: broadcaster,
+                            feeEstimate: estimate,
+                            feeTokenAddress: feeAddr,
+                            onStep: progressHandler,
+                            onProofProgress: proofHandler
+                        )
+                    } else {
+                        retryHash = try await service.unshieldBaseTokenViaBroadcaster(
+                            chainName: network.selectedChain.rawValue,
+                            walletID: wallet.id,
+                            encryptionKey: encryptionKey,
+                            toAddress: destination,
+                            amount: weiAmount,
+                            broadcaster: broadcaster,
+                            feeEstimate: estimate,
+                            onStep: progressHandler,
+                            onProofProgress: proofHandler
+                        )
+                    }
+                    if let prev = currentStep { completedSteps.insert("\(prev)") }
+                    finishWithTxHash(retryHash)
+                } catch {
+                    errorMessage = error.localizedDescription
+                    broadcasterPhase = .idle
+                    currentStep = nil
+                    completedSteps = []
+                    proofProgress = nil
+                }
+            } else {
+                errorMessage = firstError.localizedDescription
+                broadcasterPhase = .idle
+                currentStep = nil
+                completedSteps = []
+                proofProgress = nil
+            }
         }
     }
 
     // MARK: - Helpers
 
+    /// Convert the user-entered amount to the token's smallest unit (wei).
+    private func parseAmountToWei() -> String? {
+        guard let parsed = Decimal(string: amount), parsed > 0 else { return nil }
+        let divisor = pow(Decimal(10), token.decimals)
+        let handler = NSDecimalNumberHandler(
+            roundingMode: .plain, scale: 0,
+            raiseOnExactness: false, raiseOnOverflow: false,
+            raiseOnUnderflow: false, raiseOnDivideByZero: false
+        )
+        return NSDecimalNumber(decimal: parsed * divisor)
+            .rounding(accordingToBehavior: handler).stringValue
+    }
+
     private func finishWithTxHash(_ txHash: String) {
         resultTxHash = txHash
-        statusMessage = nil
+        statusMessage = "Waiting for confirmation..."
         proofProgress = nil
         transactionStore.record(Transaction(
             id: UUID().uuidString,
@@ -489,8 +780,13 @@ struct UnshieldSheet: View {
             toAddress: destination
         ))
         let chain = network.selectedChain.rawValue
-        balanceService?.invalidateEthBalance(chainName: chain, address: destination)
-        balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
+        Task {
+            try? await service.waitForTransaction(chainName: chain, txHash: txHash)
+            statusMessage = nil
+            balanceService?.invalidateEthBalance(chainName: chain, address: destination)
+            balanceService?.invalidateERC20Balances(chainName: chain, address: destination)
+            balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
+        }
     }
 
     private func formattedFee(for broadcaster: BroadcasterInfo) -> String {
