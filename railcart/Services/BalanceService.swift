@@ -218,6 +218,35 @@ final class BalanceService {
         ethBalanceCache.removeValue(forKey: "\(chainName):\(address)")
     }
 
+    // MARK: - Stale token tracking
+
+    /// Tokens with a pending transaction whose balance is out of date.
+    /// Key: "chain:walletID:tokenAddress", value: expiry time.
+    private(set) var staleTokens: [String: Date] = [:]
+
+    /// Mark a token's private balance as stale (pending tx, balance will be out of date).
+    func markTokenStale(chainName: String, walletID: String, tokenAddress: String, duration: TimeInterval = 300) {
+        let key = "\(chainName):\(walletID):\(tokenAddress.lowercased())"
+        staleTokens[key] = Date().addingTimeInterval(duration)
+    }
+
+    /// Check if a token's private balance is stale.
+    func isTokenStale(chainName: String, walletID: String, tokenAddress: String) -> Bool {
+        let key = "\(chainName):\(walletID):\(tokenAddress.lowercased())"
+        guard let expiry = staleTokens[key] else { return false }
+        if Date() > expiry {
+            staleTokens.removeValue(forKey: key)
+            return false
+        }
+        return true
+    }
+
+    /// Clear stale marker for a token (e.g. after a successful rescan picks up the change).
+    func clearStale(chainName: String, walletID: String, tokenAddress: String) {
+        let key = "\(chainName):\(walletID):\(tokenAddress.lowercased())"
+        staleTokens.removeValue(forKey: key)
+    }
+
     func invalidatePrivateBalances(chainName: String, walletID: String) {
         privateBalanceCache.removeValue(forKey: "\(chainName):\(walletID)")
     }

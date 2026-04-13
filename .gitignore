@@ -1,6 +1,10 @@
 # Bundled Node.js binary (downloaded via scripts/setup-node.sh)
 vendor/node/
 
+# rs-poseidon build artifacts (built via scripts/build-rs-poseidon.sh)
+vendor/rs-poseidon/target/
+vendor/rs-poseidon/RsPoseidon.xcframework/
+
 config-example.json
 
 # Xcode

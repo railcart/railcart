@@ -182,33 +182,12 @@ export function registerNativeProofMethods() {
 
     const boundParamsHash = hashBoundParamsV2(boundParams);
 
-    // Use the SDK wallet's merkle tree root (authoritative, matches on-chain)
-    // instead of the native scanner's root which may differ.
-    const sdkWallet = _require("./wallet/abstract-wallet.js");
-    const txidMerkletree = wallet.getUTXOMerkletree
-      ? wallet.getUTXOMerkletree(txidVersion, chain)
-      : null;
-    let effectiveMerkleRoot = BigInt(merkleRoot);
-    let effectivePathElements = utxos.map(u => u.pathElements.map(e => BigInt(e)));
-
-    if (txidMerkletree) {
-      try {
-        const sdkRoot = await txidMerkletree.getRoot(treeNumber);
-        if (sdkRoot) {
-          effectiveMerkleRoot = ByteUtils.hexToBigInt(sdkRoot);
-          process.stderr.write(`[native-proof] Using SDK merkle root: ${sdkRoot}\n`);
-          // Also get SDK's merkle proof for each UTXO
-          const sdkPaths = await Promise.all(
-            utxos.map(u => txidMerkletree.getMerkleProof(treeNumber, u.leafIndex))
-          );
-          effectivePathElements = sdkPaths.map(proof =>
-            proof.elements.map(e => ByteUtils.hexToBigInt(e))
-          );
-        }
-      } catch (e) {
-        process.stderr.write(`[native-proof] SDK merkle tree unavailable, using native root: ${e.message}\n`);
-      }
-    }
+    // Use native scanner's merkle root and proofs directly.
+    // The SDK tree is not scanned (only the native scanner runs), so SDK
+    // proofs are stale and unreliable.
+    const effectiveMerkleRoot = BigInt(merkleRoot);
+    const effectivePathElements = utxos.map(u => u.pathElements.map(e => BigInt(e)));
+    process.stderr.write(`[native-proof] Using native merkle root: ${merkleRoot}\n`);
 
     // Build nullifiers from native scanner UTXOs
     const nullifiers = utxos.map(u =>

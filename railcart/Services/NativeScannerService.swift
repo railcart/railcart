@@ -121,7 +121,7 @@ final class NativeScannerService {
             if totalCommitments == 0 && totalNullifiers == 0 {
                 updateProgress(.complete, progress: 1.0, status: "Up to date")
             } else {
-                // Phase 3: Decrypt commitments (CPU-bound, most of the time)
+                // Phase 3: Read commitments (CPU-bound, most of the time)
                 // This phase gets 0.35 – 0.92 of the progress bar
                 let decryptStart = 0.35
                 let decryptEnd = 0.92
@@ -129,7 +129,7 @@ final class NativeScannerService {
                 updateProgress(
                     .decryptingCommitments(processed: 0, total: totalCommitments),
                     progress: decryptStart,
-                    status: "Decrypting \(totalCommitments) commitments..."
+                    status: "Reading \(totalCommitments) commitments..."
                 )
 
                 for walletID in walletIDs {
@@ -143,7 +143,7 @@ final class NativeScannerService {
                             self?.updateProgress(
                                 .decryptingCommitments(processed: processed, total: total),
                                 progress: progress,
-                                status: "Decrypting commitments: \(processed) / \(total)"
+                                status: "Reading commitments: \(processed) / \(total)"
                             )
                         }
                     }

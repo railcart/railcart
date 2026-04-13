@@ -244,7 +244,18 @@ public final class Scanner: @unchecked Sendable {
 
         let chunkSize = 500
 
+        // Remap any leaves with position >= maxLeaves to the correct tree
+        // (subgraph sometimes reports boundary leaves in the wrong tree).
+        var remapped = [Int: [(position: Int, hash: Data)]]()
         for (treeNumber, leaves) in pendingLeaves {
+            for leaf in leaves {
+                let actualTree = treeNumber + leaf.position / PoseidonMerkleTree.maxLeaves
+                let actualPos = leaf.position % PoseidonMerkleTree.maxLeaves
+                remapped[actualTree, default: []].append((position: actualPos, hash: leaf.hash))
+            }
+        }
+
+        for (treeNumber, leaves) in remapped {
             var tree = trees[treeNumber] ?? PoseidonMerkleTree()
             let sorted = leaves.sorted { $0.position < $1.position }
 
@@ -307,14 +318,18 @@ public final class Scanner: @unchecked Sendable {
     }
 
     private func commitmentTreeInfo(_ commitment: ScanCommitment) -> (tree: Int, position: Int, hash: Data) {
-        switch commitment {
-        case .transact(let tc):
-            return (tc.utxoTree, tc.utxoIndex, tc.hash)
-        case .shield(let sc):
-            return (sc.utxoTree, sc.utxoIndex, sc.hash)
-        case .opaque(let hash, let tree, let index, _):
-            return (tree, index, hash)
+        let (tree, position, hash): (Int, Int, Data) = switch commitment {
+        case .transact(let tc): (tc.utxoTree, tc.utxoIndex, tc.hash)
+        case .shield(let sc): (sc.utxoTree, sc.utxoIndex, sc.hash)
+        case .opaque(let hash, let tree, let index, _): (tree, index, hash)
         }
+        // The subgraph occasionally reports position 65536 in tree N, which is
+        // actually tree N+1 position 0 on-chain. Remap to match the contract.
+        if position >= PoseidonMerkleTree.maxLeaves {
+            return (tree + position / PoseidonMerkleTree.maxLeaves,
+                    position % PoseidonMerkleTree.maxLeaves, hash)
+        }
+        return (tree, position, hash)
     }
 
     private func commitmentBlock(_ commitment: ScanCommitment) -> Int {

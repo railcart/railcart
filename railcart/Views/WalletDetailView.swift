@@ -96,7 +96,15 @@ struct WalletDetailView: View {
                         scanProgress: balanceService?.scanProgress ?? 0,
                         errorMessage: nil,
                         onRefresh: { Task { await refreshPrivateBalances() } },
-                        onUnshield: { token in unshieldToken = token }
+                        onUnshield: { token in unshieldToken = token },
+                        isTokenStale: { token in
+                            guard let addr = token.address(on: network.selectedChain) else { return false }
+                            return balanceService?.isTokenStale(
+                                chainName: network.selectedChain.rawValue,
+                                walletID: wallet.id,
+                                tokenAddress: addr
+                            ) ?? false
+                        }
                     )
                 }
                 .padding(20)

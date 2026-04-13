@@ -17,11 +17,16 @@ let package = Package(
             pkgConfig: "libsodium",
             providers: [.brew(["libsodium"])]
         ),
+        .binaryTarget(
+            name: "RsPoseidon",
+            path: "../../vendor/rs-poseidon/RsPoseidon.xcframework"
+        ),
         .target(
             name: "RailcartCrypto",
             dependencies: [
                 .product(name: "BigInt", package: "BigInt"),
                 "CSodium",
+                "RsPoseidon",
             ]
         ),
         .testTarget(

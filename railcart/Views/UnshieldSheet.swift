@@ -676,12 +676,18 @@ struct UnshieldSheet: View {
             toAddress: destination
         ))
         let chain = network.selectedChain.rawValue
+        let tokenAddress = token.address(on: network.selectedChain) ?? ""
+        balanceService?.markTokenStale(chainName: chain, walletID: wallet.id, tokenAddress: tokenAddress)
         Task {
             try? await service.waitForTransaction(chainName: chain, txHash: txHash)
             statusMessage = nil
             balanceService?.invalidateEthBalance(chainName: chain, address: destination)
             balanceService?.invalidateERC20Balances(chainName: chain, address: destination)
             balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
+            // Wait for the subgraph to index the confirmed block before rescanning
+            try? await Task.sleep(for: .seconds(15))
+            await balanceService?.scanAllPrivateBalances(chainName: chain, wallets: [wallet])
+            balanceService?.clearStale(chainName: chain, walletID: wallet.id, tokenAddress: tokenAddress)
         }
     }
 

@@ -1,19 +1,11 @@
 import BigInt
+import RsPoseidon
 
 /// Poseidon hash function over the BN254 scalar field.
 ///
-/// Implements the Hades permutation design with parameters matching
-/// the RAILGUN/circomlibjs implementation:
-/// - S-box: x^5
-/// - Full rounds: 8 (4 at start, 4 at end)
-/// - Partial rounds: varies by state width (56, 57, 56, 60)
-/// - Field: BN254 scalar field (Fr)
-///
-/// Supports 1–4 inputs (state width t = 2–5).
+/// Backed by rs-poseidon (https://github.com/logos-storage/rs-poseidon),
+/// the same implementation used by RAILGUN's poseidon-hash-wasm.
 public enum Poseidon {
-    /// Number of full rounds (split half before, half after partial rounds).
-    private static let nRoundsF = 8
-
     /// Compute the Poseidon hash of 1–4 field elements.
     ///
     /// Returns a single field element (the capacity cell after permutation).
@@ -21,47 +13,32 @@ public enum Poseidon {
         precondition(!inputs.isEmpty && inputs.count <= 4,
                      "Poseidon supports 1–4 inputs, got \(inputs.count)")
 
-        let t = inputs.count + 1
-        let idx = t - 2 // index into constants arrays
-        let nRoundsP = PoseidonConstants.nRoundsP[idx]
-        let totalRounds = nRoundsF + nRoundsP
-        let C = PoseidonConstants.C[idx]
-        let M = PoseidonConstants.M[idx]
-        let F = BN254Field.self
+        // Reduce inputs mod p (rs-poseidon requires values < field prime)
+        let reduced = inputs.map { $0 % BN254Field.prime }
 
-        // Initial state: [0, input1, input2, ...]
-        var state = [F.zero] + inputs.map { F.reduce($0) }
-
-        for r in 0..<totalRounds {
-            // AddRoundConstants
-            for i in 0..<t {
-                state[i] = F.add(state[i], C[r * t + i])
+        // Pack into a flat contiguous buffer: [input0_limb0..3, input1_limb0..3, ...]
+        var flat = [UInt64](repeating: 0, count: reduced.count * 4)
+        for (i, val) in reduced.enumerated() {
+            let words = val.words
+            for j in 0..<min(words.count, 4) {
+                flat[i * 4 + j] = UInt64(words[j])
             }
-
-            // SubWords (S-box)
-            if r < nRoundsF / 2 || r >= nRoundsF / 2 + nRoundsP {
-                // Full round: apply S-box to all elements
-                for i in 0..<t {
-                    state[i] = F.pow5(state[i])
-                }
-            } else {
-                // Partial round: apply S-box only to first element
-                state[0] = F.pow5(state[0])
-            }
-
-            // MixLayer (MDS matrix multiplication)
-            var newState = [BigUInt](repeating: F.zero, count: t)
-            for i in 0..<t {
-                var acc = F.zero
-                for j in 0..<t {
-                    acc = F.add(acc, F.mul(M[i][j], state[j]))
-                }
-                newState[i] = acc
-            }
-            state = newState
         }
 
-        return state[0]
+        var output: [UInt64] = [0, 0, 0, 0]
+
+        flat.withUnsafeBufferPointer { flatBuf in
+            flatBuf.baseAddress!.withMemoryRebound(
+                to: (UInt64, UInt64, UInt64, UInt64).self,
+                capacity: inputs.count
+            ) { ptr in
+                output.withUnsafeMutableBufferPointer { outBuf in
+                    poseidon_hash(ptr, Int32(inputs.count), outBuf.baseAddress!)
+                }
+            }
+        }
+
+        return limbsToBigUInt(output)
     }
 
     /// Convenience: hash two field elements (used for merkle tree nodes).
@@ -73,6 +50,20 @@ public enum Poseidon {
     public static func hashHex(_ inputs: [BigUInt]) -> String {
         let result = hash(inputs)
         return "0x" + String(result, radix: 16).paddedLeft(toLength: 64, with: "0")
+    }
+
+    // MARK: - Limb conversion
+
+    /// Convert 4 little-endian uint64 limbs to a BigUInt.
+    private static func limbsToBigUInt(_ limbs: [UInt64]) -> BigUInt {
+        var result = BigUInt(limbs[3])
+        result <<= 64
+        result |= BigUInt(limbs[2])
+        result <<= 64
+        result |= BigUInt(limbs[1])
+        result <<= 64
+        result |= BigUInt(limbs[0])
+        return result
     }
 }
 

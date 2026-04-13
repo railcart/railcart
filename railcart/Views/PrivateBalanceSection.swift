@@ -17,6 +17,7 @@ struct PrivateBalanceSection: View {
     let errorMessage: String?
     let onRefresh: () -> Void
     var onUnshield: ((Token) -> Void)? = nil
+    var isTokenStale: (Token) -> Bool = { _ in false }
 
     var body: some View {
         BalanceCard {
@@ -75,12 +76,14 @@ struct PrivateBalanceSection: View {
                         tokenBalances.first { $0.tokenAddress.lowercased() == addr.lowercased() }?.amount
                     }
                     let displayBalance = balance ?? (hasSynced ? "0" : nil)
+                    let stale = isTokenStale(token)
                     let state: TokenActionState = hasNonZero(displayBalance) ? .enabled : .zeroBalance
                     TokenRow(
                         token: token,
                         balance: displayBalance,
                         action: .unshield,
                         actionState: state,
+                        isStale: stale,
                         onAction: { onUnshield?(token) }
                     )
                 }

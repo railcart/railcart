@@ -240,6 +240,9 @@ struct ShieldSheet: View {
             balanceService?.invalidateEthBalance(chainName: chain, address: unlocked.ethAddress)
             balanceService?.invalidateERC20Balances(chainName: chain, address: unlocked.ethAddress)
             balanceService?.invalidatePrivateBalances(chainName: chain, walletID: wallet.id)
+            // Wait for the subgraph to index the confirmed block before rescanning
+            try? await Task.sleep(for: .seconds(15))
+            await balanceService?.scanAllPrivateBalances(chainName: chain, wallets: [wallet])
         } catch {
             errorMessage = error.localizedDescription
             statusMessage = nil

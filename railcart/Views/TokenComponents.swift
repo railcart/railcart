@@ -78,6 +78,7 @@ struct TokenRow: View {
     let balance: String?
     var action: TokenCellAction? = nil
     var actionState: TokenActionState = .hidden
+    var isStale: Bool = false
     var onAction: (() -> Void)? = nil
 
     var body: some View {
@@ -93,10 +94,17 @@ struct TokenRow: View {
             }
             Spacer(minLength: 4)
             VStack(alignment: .trailing, spacing: 6) {
-                Text(balance.map { token.formatBalance($0) } ?? "--")
-                    .font(.body.monospaced().bold())
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if isStale {
+                        Text("pending tx")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
+                    Text(balance.map { token.formatBalance($0) } ?? "--")
+                        .font(.body.monospaced().bold())
+                        .foregroundStyle(isStale ? .secondary : .primary)
+                        .lineLimit(1)
+                }
                 if let action, actionState != .hidden {
                     actionPill(action, state: actionState, action: onAction)
                 }
