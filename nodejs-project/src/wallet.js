@@ -378,14 +378,50 @@ export function registerWalletMethods() {
    *
    * params: { chainName: string }
    */
+  /**
+   * Simulate a transaction via eth_call to check if it would revert.
+   * Returns { success: true } or { success: false, reason: "revert reason" }.
+   */
+  registerMethod("simulateTransaction", async (params) => {
+    requireEngine();
+    const { chainName, to, data, gasPrice } = params;
+    const { networkName } = chainForName(chainName);
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      try {
+        const callParams = { to, data };
+        if (gasPrice) callParams.gasPrice = BigInt(gasPrice);
+        await provider.call(callParams);
+        return { success: true };
+      } catch (err) {
+        // Extract revert reason from the error
+        let reason = err.reason || err.shortMessage || err.message || "Unknown revert";
+        if (err.data && typeof err.data === "string" && err.data.length > 2) {
+          // Try to decode revert string from ABI-encoded error data
+          try {
+            const { ethers } = await import("ethers");
+            const iface = new ethers.Interface(["error Error(string)"]);
+            const decoded = iface.parseError(err.data);
+            if (decoded) reason = decoded.args[0];
+          } catch (_) {}
+        }
+        return { success: false, reason };
+      }
+    });
+  });
+
   registerMethod("getGasPrice", async (params) => {
     requireEngine();
     const { chainName } = params;
     const { networkName } = chainForName(chainName);
     return withProviderRetry(chainName, async () => {
       const provider = getFallbackProviderForNetwork(networkName);
-      const feeData = await provider.getFeeData();
-      return { gasPrice: (feeData.gasPrice || 0n).toString() };
+      // Return the current base fee as the minimum gas price floor.
+      // This is used for overallBatchMinGasPrice (a floor, not an estimate).
+      // The broadcaster chooses its own gas price above this floor.
+      const latestBlock = await provider.getBlock("latest");
+      const baseFee = latestBlock?.baseFeePerGas ?? 0n;
+      return { gasPrice: baseFee.toString() };
     });
   });
 
@@ -1039,64 +1075,40 @@ export function registerWalletMethods() {
    */
   registerMethod("gasEstimateForBroadcasterUnshieldERC20", async (params) => {
     requireEngine();
-    const { chainName, railgunWalletID, encryptionKey, toAddress, tokenAddress, amount, feePerUnitGas, feeTokenAddress } = params;
+    const { chainName, feePerUnitGas } = params;
     const { networkName } = chainForName(chainName);
-    const txidVersion = TXIDVersion.V2_PoseidonMerkle;
 
-    const erc20AmountRecipients = [
-      {
-        tokenAddress,
-        amount: BigInt(amount),
-        recipientAddress: toAddress,
-      },
-    ];
+    // Bypass SDK UTXO selection (which requires an SDK scan) and compute the
+    // broadcaster fee using the same formula as the SDK:
+    //   maximumGas = gasLimit * gasPrice  (in ETH-wei)
+    //   tokenFee = (feePerUnitGas * maximumGas) / 10^18
+    // We add a 50% buffer on the gas price to absorb mainnet volatility
+    // between fee estimation and broadcaster submission.
+    const UNSHIELD_GAS_ESTIMATE = 420_000n;
+    const ONE_UNIT_GAS = 10n ** 18n;
 
     return withProviderRetry(chainName, async () => {
-    const provider = getFallbackProviderForNetwork(networkName);
-    const feeData = await provider.getFeeData();
+      const provider = getFallbackProviderForNetwork(networkName);
 
-    let originalGasDetails;
-    if (feeData.maxFeePerGas != null) {
-      originalGasDetails = {
-        evmGasType: 2,
-        gasEstimate: 0n,
-        maxFeePerGas: feeData.maxFeePerGas,
-        maxPriorityFeePerGas: feeData.maxPriorityFeePerGas ?? 1000000000n,
+      // Get gas price from the latest block's baseFeePerGas (most reliable source).
+      // FallbackProvider's getFeeData() can return mangled values on some RPCs.
+      // Use baseFee * 2 + 1 gwei tip as maxFeePerGas (standard EIP-1559 formula),
+      // then add 50% buffer for volatility between estimation and submission.
+      const latestBlock = await provider.getBlock("latest");
+      const baseFee = latestBlock?.baseFeePerGas ?? 0n;
+      const tipCap = 1_000_000_000n; // 1 gwei priority fee
+      const gasPrice = baseFee * 2n + tipCap;
+      const bufferedGasPrice = gasPrice + gasPrice / 2n;
+      const gasLimit = UNSHIELD_GAS_ESTIMATE + UNSHIELD_GAS_ESTIMATE / 10n;
+      const maximumGas = gasLimit * bufferedGasPrice;
+      const broadcasterFeeAmount = (BigInt(feePerUnitGas) * maximumGas) / ONE_UNIT_GAS;
+
+      process.stderr.write(`[fee-estimate] baseFee=${baseFee} (${Number(baseFee)/1e9} gwei), gasPrice=${gasPrice} (${Number(gasPrice)/1e9} gwei), broadcasterFeeAmount=${broadcasterFeeAmount}\n`);
+      return {
+        gasEstimate: UNSHIELD_GAS_ESTIMATE.toString(),
+        broadcasterFeeAmount: broadcasterFeeAmount.toString(),
+        gasPrice: gasPrice.toString(),
       };
-    } else {
-      originalGasDetails = {
-        evmGasType: 1,
-        gasEstimate: 0n,
-        gasPrice: feeData.gasPrice ?? 1000000000n,
-      };
-    }
-
-    const feeTokenDetails = {
-      tokenAddress: feeTokenAddress,
-      feePerUnitGas: BigInt(feePerUnitGas),
-    };
-
-    const result = await gasEstimateForUnprovenUnshield(
-      txidVersion,
-      networkName,
-      railgunWalletID,
-      encryptionKey,
-      erc20AmountRecipients,
-      [], // nftAmountRecipients
-      originalGasDetails,
-      feeTokenDetails,
-      false, // sendWithPublicWallet — broadcaster pays gas
-    );
-
-    const gasEstimate = result.gasEstimate;
-    const broadcasterFeeAmount = gasEstimate * BigInt(feePerUnitGas);
-    const gasPrice = (feeData.gasPrice || feeData.maxFeePerGas || 0n);
-
-    return {
-      gasEstimate: gasEstimate.toString(),
-      broadcasterFeeAmount: broadcasterFeeAmount.toString(),
-      gasPrice: gasPrice.toString(),
-    };
     });
   });
 

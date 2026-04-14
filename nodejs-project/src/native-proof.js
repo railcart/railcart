@@ -33,6 +33,7 @@ const { hashBoundParamsV2 } = _require("./transaction/bound-params.js");
 const { ByteUtils } = _require("./utils/bytes.js");
 const { getChainFullNetworkID } = _require("./chain/chain.js");
 const { poseidon } = _require("./utils/poseidon.js");
+const { decodeAddress } = _require("./key-derivation/bech32.js");
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const HASH_ZERO = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -94,16 +95,37 @@ export function registerNativeProofMethods() {
     const unshieldAmount = BigInt(amount);
     const totalIn = utxos.reduce((sum, u) => sum + BigInt(u.value), 0n);
 
-    // Build outputs — IMPORTANT: internal outputs (change) FIRST, unshield LAST.
+    // Build outputs — broadcaster fee FIRST, change second, unshield LAST.
+    // The broadcaster expects its fee as the first commitment.
     // The circuit uses the `unshield` flag to treat the last output as a raw address.
     const outputs = [];
     const internalOutputs = []; // Only TransactNotes (need encryption)
 
-    // 1. Change output first (back to self)
     let feeAmount = 0n;
     if (broadcasterFeeAmount && broadcasterRailgunAddress && BigInt(broadcasterFeeAmount) > 0n) {
       feeAmount = BigInt(broadcasterFeeAmount);
     }
+    if (!sendWithPublicWallet && broadcasterRailgunAddress && feeAmount === 0n) {
+      throw new Error(`Broadcaster fee is 0 — cannot create fee note. broadcasterFeeAmount=${broadcasterFeeAmount}`);
+    }
+
+    // 1. Broadcaster fee note FIRST (broadcaster expects it as the first commitment)
+    if (feeAmount > 0n && broadcasterRailgunAddress) {
+      const broadcasterAddressData = decodeAddress(broadcasterRailgunAddress);
+      const feeNote = TransactNote.createTransfer(
+        broadcasterAddressData, // receiver (broadcaster)
+        addressKeys,            // sender (self)
+        feeAmount,
+        tokenData,
+        false,                  // showSenderAddressToRecipient — never for broadcaster fees
+        1,                      // OutputType.BroadcasterFee
+        undefined,              // memoText
+      );
+      outputs.push(feeNote);
+      internalOutputs.push(feeNote);
+    }
+
+    // 2. Change output (back to self)
     const change = totalIn - unshieldAmount - feeAmount;
     if (change > 0n) {
       const changeNote = TransactNote.createTransfer(
@@ -119,7 +141,7 @@ export function registerNativeProofMethods() {
       internalOutputs.push(changeNote);
     }
 
-    // 2. Unshield output LAST (public, no encryption)
+    // 3. Unshield output LAST (public, no encryption)
     const unshieldNote = new UnshieldNoteERC20(
       toAddress,
       unshieldAmount,
@@ -285,12 +307,59 @@ export function registerNativeProofMethods() {
       [txStruct],
     );
 
+    // Generate pre-transaction POIs (required by broadcasters on mainnet)
+    let preTransactionPOIsPerTxidLeafPerList = {};
+    if (!sendWithPublicWallet) {
+      const { POI } = _require("./poi/poi.js");
+      const { BlindedCommitment } = _require("./poi/blinded-commitment.js");
+      const { getGlobalTreePosition } = _require("./poi/global-tree-position.js");
+
+      const activeListKeys = POI.getActiveListKeys();
+      if (activeListKeys.length > 0) {
+        // Build mock TXO objects matching the SDK's expected shape.
+        // notePublicKey = poseidon(masterPublicKey, random)
+        const txos = utxos.map(u => {
+          const globalPos = getGlobalTreePosition(treeNumber, u.leafIndex);
+          const npk = poseidon([addressKeys.masterPublicKey, BigInt(u.random)]);
+          return {
+            blindedCommitment: BlindedCommitment.getForShieldOrTransact(
+              ByteUtils.nToHex(BigInt(u.commitmentHash), 32, true),
+              npk,
+              globalPos,
+            ),
+            note: {
+              tokenHash: tokenHash,
+              random: u.random,
+              value: BigInt(u.value),
+            },
+            position: u.leafIndex,
+            tree: treeNumber,
+          };
+        });
+
+        for (const listKey of activeListKeys) {
+          preTransactionPOIsPerTxidLeafPerList[listKey] ??= {};
+          const { txidLeafHash, preTransactionPOI } =
+            await wallet.generatePreTransactionPOI(
+              txidVersion, chain, listKey, txos,
+              publicInputs, privateInputs, treeNumber,
+              true, // hasUnshield
+              () => {},
+            );
+          preTransactionPOIsPerTxidLeafPerList[listKey][txidLeafHash] = preTransactionPOI;
+        }
+        process.stderr.write(`[native-proof] Generated POIs for ${activeListKeys.length} list(s)\n`);
+      }
+    }
+
     return {
       transaction: {
         to: transaction.to,
         data: transaction.data,
         value: transaction.value?.toString() ?? "0",
       },
+      nullifiers: nullifiers.map(n => ByteUtils.nToHex(n, 32, true)),
+      preTransactionPOIsPerTxidLeafPerList,
     };
   });
 }

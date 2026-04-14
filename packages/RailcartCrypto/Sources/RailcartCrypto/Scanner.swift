@@ -286,7 +286,9 @@ public final class Scanner: @unchecked Sendable {
         }
 
         onTreeBuildProgress?(totalLeaves, totalLeaves)
-        pendingLeaves.removeAll()
+        // Keep pendingLeaves — they're needed for persistence so the tree can
+        // be rebuilt after app restart. The dedup logic (nextExpected >= tree.count)
+        // ensures they won't be re-inserted into an already-built tree.
         treesBuilt = true
     }
 

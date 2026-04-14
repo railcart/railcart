@@ -51,7 +51,6 @@ final class BalanceService {
 
     /// The currently executing scan task (only one scan runs at a time to avoid
     /// overloading the node process with concurrent merkletree rescans).
-    private var activeScanTask: Task<Void, Never>?
 
     /// Last known scan progress per chain, so switching back shows the most recent value.
     private var lastProgress: [String: (step: String?, progress: Double)] = [:]
@@ -106,7 +105,7 @@ final class BalanceService {
     /// can't be cancelled, so we always cache the results.
     /// Scan the merkletree for all wallets on a chain and cache results.
     /// If a scan is already in flight for this chain, awaits that scan instead.
-    /// Scans run serially — concurrent merkletree rescans overload the node process.
+    /// Multiple chains can scan concurrently — the native scanner has per-chain state.
     /// Automatically sets up scan UI state; callers don't need to call beginScanUI.
     func scanAllPrivateBalances(chainName: String, wallets: [Wallet]) async {
         let walletIDs = wallets.map(\.id)
@@ -115,12 +114,6 @@ final class BalanceService {
             AppLogger.shared.log("sync", "Joining in-flight scan for \(chainName)")
             await existing.value
             return
-        }
-
-        // Wait for any other chain's scan to finish first
-        if let active = activeScanTask {
-            AppLogger.shared.log("sync", "Waiting for active scan to finish before scanning \(chainName)")
-            await active.value
         }
 
         beginScanUI(chainName: chainName)
@@ -161,9 +154,6 @@ final class BalanceService {
 
             inFlightScans.removeValue(forKey: chainName)
             lastProgress.removeValue(forKey: chainName)
-            if inFlightScans[chainName] == nil {
-                activeScanTask = nil
-            }
 
             if scanningChain == chainName {
                 isScanning = false
@@ -173,7 +163,6 @@ final class BalanceService {
             }
         }
         inFlightScans[chainName] = task
-        activeScanTask = task
         await task.value
     }
 

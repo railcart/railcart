@@ -52,7 +52,7 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func unshieldBaseTokenViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func unshieldERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func estimateBroadcasterFeeERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, feePerUnitGas: String, feeTokenAddress: String) async throws -> BroadcasterFeeEstimate { fatalError() }
-    func unshieldERC20ViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
+    func unshieldERC20ViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, nativeScanner: NativeScannerService, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func waitForTransaction(chainName: String, txHash: String) async throws { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
     func loadChainProviderFromRemoteConfig(chainName: String) async throws { fatalError() }
@@ -252,6 +252,7 @@ protocol WalletServiceProtocol: Sendable {
         toAddress: String, tokenAddress: String, amount: String,
         broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate,
         feeTokenAddress: String,
+        nativeScanner: NativeScannerService,
         onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
         onProofProgress: @escaping @Sendable (Double) -> Void
     ) async throws -> String
@@ -897,6 +898,7 @@ final class LiveWalletService: WalletServiceProtocol {
         toAddress: String, tokenAddress: String, amount: String,
         broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate,
         feeTokenAddress: String,
+        nativeScanner: NativeScannerService,
         onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
         onProofProgress: @escaping @Sendable (Double) -> Void
     ) async throws -> String {
@@ -907,43 +909,77 @@ final class LiveWalletService: WalletServiceProtocol {
             }
         }
 
-        // Step 1: Generate ZK proof with broadcaster fee
+        // Step 1: Generate proof + transaction via native scanner path
+        // (bypasses SDK UTXO selection which requires SDK scanning)
         onStep(.generatingProof)
-        let _ = try await bridge.callRaw("generateBroadcasterUnshieldERC20Proof", params: [
-            "chainName": chainName,
-            "railgunWalletID": walletID,
-            "encryptionKey": encryptionKey,
-            "toAddress": toAddress,
-            "tokenAddress": tokenAddress,
-            "amount": amount,
-            "broadcasterFeeTokenAddress": feeTokenAddress,
-            "broadcasterFeeAmount": feeEstimate.broadcasterFeeAmount,
-            "broadcasterRailgunAddress": broadcaster.railgunAddress,
-            "overallBatchMinGasPrice": feeEstimate.gasPrice,
-        ], timeout: .seconds(300))
 
-        // Step 2: Populate proved transaction
-        onStep(.populatingTransaction)
-        let populateResult = try await bridge.callRaw("populateBroadcasterUnshieldERC20", params: [
-            "chainName": chainName,
-            "railgunWalletID": walletID,
-            "toAddress": toAddress,
-            "tokenAddress": tokenAddress,
-            "amount": amount,
-            "broadcasterFeeTokenAddress": feeTokenAddress,
-            "broadcasterFeeAmount": feeEstimate.broadcasterFeeAmount,
-            "broadcasterRailgunAddress": broadcaster.railgunAddress,
-            "overallBatchMinGasPrice": feeEstimate.gasPrice,
-        ])
+        guard let scanner = nativeScanner.getScanner(walletID: walletID, chainName: chainName) else {
+            throw NSError(domain: "NativeUnshield", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scanner not initialized"])
+        }
 
-        guard let resultDict = populateResult as? [String: Any],
+        scanner.onTreeBuildProgress = { @Sendable (inserted, total) in
+            onStep(.generatingProof)
+        }
+
+        let proofInputs = try await Task.detached(priority: .userInitiated) {
+            try ProofAssembler.assembleUnshield(
+                scanner: scanner,
+                tokenAddress: tokenAddress,
+                amount: BigUInt(amount) ?? 0
+            )
+        }.value
+
+        // Fetch fresh gas price with 20% buffer to avoid base fee rejection
+        struct GasPriceResponse: Decodable { let gasPrice: String }
+        let gasPriceResult = try await bridge.call("getGasPrice", params: [
+            "chainName": chainName,
+        ], as: GasPriceResponse.self)
+        let freshGasPrice: String
+        if let gp = BigUInt(gasPriceResult.gasPrice) {
+            freshGasPrice = String(gp * 120 / 100) // 20% buffer
+        } else {
+            freshGasPrice = feeEstimate.gasPrice
+        }
+
+        var bridgeParams = proofInputs.toBridgeJSON()
+        bridgeParams["chainName"] = chainName
+        bridgeParams["railgunWalletID"] = walletID
+        bridgeParams["encryptionKey"] = encryptionKey
+        bridgeParams["toAddress"] = toAddress
+        bridgeParams["sendWithPublicWallet"] = false
+        bridgeParams["broadcasterFeeTokenAddress"] = feeTokenAddress
+        bridgeParams["broadcasterFeeAmount"] = feeEstimate.broadcasterFeeAmount
+        bridgeParams["broadcasterRailgunAddress"] = broadcaster.railgunAddress
+        bridgeParams["overallBatchMinGasPrice"] = freshGasPrice
+
+        let result = try await bridge.callRaw(
+            "generateUnshieldProofNative",
+            params: bridgeParams,
+            timeout: .seconds(300)
+        )
+
+        guard let resultDict = result as? [String: Any],
               let txDict = resultDict["transaction"] as? [String: Any],
               let to = txDict["to"] as? String,
               let data = txDict["data"] as? String,
               let nullifiers = resultDict["nullifiers"] as? [String],
               let pois = resultDict["preTransactionPOIsPerTxidLeafPerList"]
         else {
-            throw NodeBridgeError.decodingError("Failed to decode broadcaster populate response")
+            throw NodeBridgeError.decodingError("Failed to decode native proof response")
+        }
+
+        // Step 2: Simulate the transaction to catch reverts before sending to broadcaster
+        struct SimResult: Decodable { let success: Bool; let reason: String? }
+        let sim = try await bridge.call("simulateTransaction", params: [
+            "chainName": chainName,
+            "to": to,
+            "data": data,
+            "gasPrice": freshGasPrice,
+        ], as: SimResult.self)
+        if !sim.success {
+            throw NSError(domain: "NativeUnshield", code: 3, userInfo: [
+                NSLocalizedDescriptionKey: "Transaction would revert: \(sim.reason ?? "unknown reason")"
+            ])
         }
 
         // Step 3: Submit to broadcaster via Waku
@@ -956,8 +992,8 @@ final class LiveWalletService: WalletServiceProtocol {
             "broadcasterRailgunAddress": broadcaster.railgunAddress,
             "broadcasterFeesID": broadcaster.feesID,
             "nullifiers": nullifiers,
-            "overallBatchMinGasPrice": feeEstimate.gasPrice,
-            "useRelayAdapt": true,
+            "overallBatchMinGasPrice": freshGasPrice,
+            "useRelayAdapt": false,
             "preTransactionPOIsPerTxidLeafPerList": pois,
         ] as [String: any Sendable], as: SubmitResponse.self, timeout: .seconds(120))
 

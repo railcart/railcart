@@ -7,6 +7,7 @@
 //  Supports direct unshield (user pays gas) or broadcaster-mediated (no gas needed).
 //
 
+import BigInt
 import SwiftUI
 
 struct UnshieldSheet: View {
@@ -169,9 +170,7 @@ struct UnshieldSheet: View {
         .frame(width: 500)
         .onDisappear {
             broadcasterPollTask?.cancel()
-            if broadcasterPhase != .idle {
-                Task { try? await bridge.callRaw("stopBroadcasterSearch") }
-            }
+            Task { try? await bridge.callRaw("stopBroadcasterSearch") }
         }
     }
 
@@ -246,7 +245,11 @@ struct UnshieldSheet: View {
                     Text("No broadcasters available").font(.caption).foregroundStyle(.secondary)
                 }
             } else {
-                Text("Select a broadcaster").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Select a broadcaster").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    Text("Fee is deducted from your private \(token.symbol) balance")
+                        .font(.caption2).foregroundStyle(.tertiary)
+                }
                 ScrollView {
                     VStack(spacing: 4) {
                         ForEach(broadcasters, id: \.feesID) { broadcaster in
@@ -264,9 +267,9 @@ struct UnshieldSheet: View {
                                     }
                                     Spacer()
                                     VStack(alignment: .trailing, spacing: 2) {
-                                        Text("Fee: \(formattedFee(for: broadcaster))")
+                                        Text("\(formattedFee(for: broadcaster)) \(token.symbol)")
                                             .font(.caption2.monospaced())
-                                        Text(token.symbol).font(.caption2).foregroundStyle(.secondary)
+                                        Text("fee").font(.caption2).foregroundStyle(.tertiary)
                                     }
                                 }
                                 .padding(8)
@@ -463,16 +466,8 @@ struct UnshieldSheet: View {
                         "useRelayAdapt": true,
                     ], as: BroadcasterListResponse.self)
 
-                    // If no broadcasters for this ERC-20, try WETH fallback
-                    if isERC20 && result.broadcasters.filter({ !$0.isExpired }).isEmpty,
-                       let wethAddr = Token.weth.address(on: chain),
-                       wethAddr.lowercased() != feeTokenAddress.lowercased() {
-                        result = try await bridge.call("getBroadcastersForToken", params: [
-                            "tokenAddress": wethAddr,
-                            "useRelayAdapt": true,
-                        ], as: BroadcasterListResponse.self)
-                        activeFeeToken = wethAddr
-                    }
+                    // Cross-token broadcaster fees (e.g. pay WETH for a USDC unshield)
+                    // are not supported by the native proof path. Don't fall back to WETH.
 
                     let available = result.broadcasters
                         .filter { !$0.isExpired }
@@ -532,55 +527,38 @@ struct UnshieldSheet: View {
             return
         }
 
+        // Always fetch a fresh fee estimate for the selected broadcaster
         let estimate: BroadcasterFeeEstimate
-        if let existing = feeEstimate,
-           let gasEst = Decimal(string: existing.gasEstimate),
-           let feeRate = Decimal(string: broadcaster.feePerUnitGas) {
-            let fee = gasEst * feeRate
-            let handler = NSDecimalNumberHandler(
-                roundingMode: .up, scale: 0,
-                raiseOnExactness: false, raiseOnOverflow: false,
-                raiseOnUnderflow: false, raiseOnDivideByZero: false
-            )
-            let feeStr = NSDecimalNumber(decimal: fee)
-                .rounding(accordingToBehavior: handler).stringValue
-            estimate = BroadcasterFeeEstimate(
-                gasEstimate: existing.gasEstimate,
-                broadcasterFeeAmount: feeStr,
-                gasPrice: existing.gasPrice
-            )
-        } else {
-            do {
-                if isERC20 {
-                    guard let tokenAddress = token.address(on: network.selectedChain),
-                          let feeAddr = resolvedFeeTokenAddress else {
-                        errorMessage = "Token not supported on this chain"
-                        return
-                    }
-                    estimate = try await service.estimateBroadcasterFeeERC20(
-                        chainName: network.selectedChain.rawValue,
-                        walletID: wallet.id,
-                        encryptionKey: encryptionKey,
-                        toAddress: destination,
-                        tokenAddress: tokenAddress,
-                        amount: weiAmount,
-                        feePerUnitGas: broadcaster.feePerUnitGas,
-                        feeTokenAddress: feeAddr
-                    )
-                } else {
-                    estimate = try await service.estimateBroadcasterFee(
-                        chainName: network.selectedChain.rawValue,
-                        walletID: wallet.id,
-                        encryptionKey: encryptionKey,
-                        toAddress: destination,
-                        amount: weiAmount,
-                        feePerUnitGas: broadcaster.feePerUnitGas
-                    )
+        do {
+            if isERC20 {
+                guard let tokenAddress = token.address(on: network.selectedChain),
+                      let feeAddr = resolvedFeeTokenAddress else {
+                    errorMessage = "Token not supported on this chain"
+                    return
                 }
-            } catch {
-                errorMessage = error.localizedDescription
-                return
+                estimate = try await service.estimateBroadcasterFeeERC20(
+                    chainName: network.selectedChain.rawValue,
+                    walletID: wallet.id,
+                    encryptionKey: encryptionKey,
+                    toAddress: destination,
+                    tokenAddress: tokenAddress,
+                    amount: weiAmount,
+                    feePerUnitGas: broadcaster.feePerUnitGas,
+                    feeTokenAddress: feeAddr
+                )
+            } else {
+                estimate = try await service.estimateBroadcasterFee(
+                    chainName: network.selectedChain.rawValue,
+                    walletID: wallet.id,
+                    encryptionKey: encryptionKey,
+                    toAddress: destination,
+                    amount: weiAmount,
+                    feePerUnitGas: broadcaster.feePerUnitGas
+                )
             }
+        } catch {
+            errorMessage = error.localizedDescription
+            return
         }
 
         broadcasterPollTask?.cancel()
@@ -607,7 +585,13 @@ struct UnshieldSheet: View {
                     broadcasterPhase = .idle
                     return
                 }
-                txHash = try await service.unshieldERC20ViaBroadcaster(
+                guard let nativeScanner = balanceService?.nativeScanner,
+                      let liveService = service as? LiveWalletService else {
+                    errorMessage = "Scanner not available"
+                    broadcasterPhase = .idle
+                    return
+                }
+                txHash = try await liveService.unshieldERC20ViaBroadcaster(
                     chainName: network.selectedChain.rawValue,
                     walletID: wallet.id,
                     encryptionKey: encryptionKey,
@@ -617,6 +601,7 @@ struct UnshieldSheet: View {
                     broadcaster: broadcaster,
                     feeEstimate: estimate,
                     feeTokenAddress: feeAddr,
+                    nativeScanner: nativeScanner,
                     onStep: progressHandler,
                     onProofProgress: proofHandler
                 )
@@ -692,11 +677,15 @@ struct UnshieldSheet: View {
     }
 
     private func formattedFee(for broadcaster: BroadcasterInfo) -> String {
-        guard let gasEst = Decimal(string: feeEstimate?.gasEstimate ?? "0"),
-              let feeRate = Decimal(string: broadcaster.feePerUnitGas) else {
+        // Use the stored broadcasterFeeAmount from the estimate (computed by the bridge
+        // using the SDK formula: tokenFee = feePerUnitGas * gasLimit * gasPrice / 10^18).
+        // Scale it by the ratio of this broadcaster's rate to the estimate's rate.
+        guard let baseFee = BigUInt(feeEstimate?.broadcasterFeeAmount ?? "0"),
+              baseFee > 0 else {
             return "..."
         }
-        let feeWei = gasEst * feeRate
-        return token.formatBalance("\(feeWei)")
+        // The estimate was computed for the "best" broadcaster. For other broadcasters,
+        // the fee scales linearly with feePerUnitGas.
+        return token.formatBalance(String(baseFee))
     }
 }
