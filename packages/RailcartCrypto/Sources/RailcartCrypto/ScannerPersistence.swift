@@ -7,6 +7,9 @@ struct ScannerState: Codable {
     let utxos: [SerializedUTXO]
     let nullifiers: [String]  // hex strings
     let pendingLeaves: [Int: [SerializedLeaf]]  // tree number → leaves
+    /// Optional nullifier → txid (hex) map. Older state files don't have it
+    /// and the debug view will miss dependencies until next rescan.
+    let nullifierTxids: [String: String]?
 
     struct SerializedUTXO: Codable {
         let tree: Int
@@ -22,6 +25,10 @@ struct ScannerState: Codable {
         let nullifier: String? // hex (BigUInt)
         let isSpent: Bool
         let commitmentType: String
+        /// Optional for backward compat with pre-POI saved state.
+        let blindedCommitment: String?
+        /// Optional for backward compat. Raw `WalletBalanceBucket` value.
+        let balanceBucket: String?
     }
 
     struct SerializedLeaf: Codable {
@@ -49,7 +56,9 @@ extension Scanner {
                     isSentNote: utxo.isSentNote,
                     nullifier: utxo.nullifier.map { String($0, radix: 16) },
                     isSpent: utxo.isSpent,
-                    commitmentType: utxo.commitmentType.rawValue
+                    commitmentType: utxo.commitmentType.rawValue,
+                    blindedCommitment: utxo.blindedCommitment,
+                    balanceBucket: utxo.balanceBucket.rawValue
                 )
             },
             nullifiers: knownNullifiersList.map { String($0, radix: 16) },
@@ -58,7 +67,11 @@ extension Scanner {
                     position: $0.position,
                     hash: $0.hash.map { String(format: "%02x", $0) }.joined()
                 )}
-            }
+            },
+            nullifierTxids: Dictionary(uniqueKeysWithValues: nullifierTxidsList.map { nullifier, txid in
+                (String(nullifier, radix: 16),
+                 txid.map { String(format: "%02x", $0) }.joined())
+            })
         )
 
         let data = try JSONEncoder().encode(state)
@@ -100,6 +113,10 @@ extension Scanner {
                     commitmentType: commitmentType
                 )
                 utxo.isSpent = s.isSpent
+                utxo.blindedCommitment = s.blindedCommitment
+                if let raw = s.balanceBucket, let bucket = WalletBalanceBucket(rawValue: raw) {
+                    utxo.balanceBucket = bucket
+                }
                 return utxo
             },
             nullifiers: Set(state.nullifiers.compactMap { BigUInt($0, radix: 16) }),
@@ -108,7 +125,18 @@ extension Scanner {
                     guard let hash = Data(hexString: s.hash) else { return nil }
                     return (position: s.position, hash: hash)
                 }
-            }
+            },
+            nullifierTxids: {
+                guard let raw = state.nullifierTxids else { return [:] }
+                var map: [BigUInt: Data] = [:]
+                for (k, v) in raw {
+                    if let key = BigUInt(k, radix: 16),
+                       let value = Data(hexString: v) {
+                        map[key] = value
+                    }
+                }
+                return map
+            }()
         )
     }
 }

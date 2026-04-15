@@ -125,7 +125,8 @@ struct ProofAssemblyTests {
                     random: BigUInt(100),
                     value: BigUInt(1000000),
                     pathElements: [BigUInt](repeating: BigUInt(0), count: 16),
-                    leafIndex: BigUInt(5)
+                    leafIndex: BigUInt(5),
+                    commitmentHash: BigUInt(0)
                 ),
             ]
         )
@@ -146,9 +147,10 @@ struct ProofAssemblyTests {
 
         let utxos = json["utxos"] as? [[String: Any]]
         #expect(utxos?.count == 1)
-        #expect((utxos?[0]["leafIndex"] as? Int) == 5)
+        let utxo = utxos?[0]
+        #expect((utxo?["leafIndex"] as? Int) == 5)
 
-        let pathElements = utxos?[0]["pathElements"] as? [String]
+        let pathElements = utxo?["pathElements"] as? [String]
         #expect(pathElements?.count == 16)
     }
 }

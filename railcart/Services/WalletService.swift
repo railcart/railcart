@@ -56,6 +56,9 @@ struct UnimplementedWalletService: WalletServiceProtocol {
     func waitForTransaction(chainName: String, txHash: String) async throws { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
     func loadChainProviderFromRemoteConfig(chainName: String) async throws { fatalError() }
+    func getPOINodeURLs() async throws -> [String] { fatalError() }
+    func generatePOIProofs(chainName: String, walletID: String) async throws { fatalError() }
+    func setOnPOIProofProgress(_ handler: @escaping @Sendable (POIProofProgressEvent) -> Void) { fatalError() }
 }
 
 // MARK: - Response Types
@@ -263,6 +266,25 @@ protocol WalletServiceProtocol: Sendable {
     // Settings
     func loadChainProvider(chainName: String, providerUrl: String) async throws
     func loadChainProviderFromRemoteConfig(chainName: String) async throws
+
+    // POI
+    func getPOINodeURLs() async throws -> [String]
+    func generatePOIProofs(chainName: String, walletID: String) async throws
+    func setOnPOIProofProgress(_ handler: @escaping @Sendable (POIProofProgressEvent) -> Void)
+}
+
+/// Streamed progress from the SDK while POI proofs are being generated and
+/// submitted. Maps directly to the `poiProofProgress` bridge event.
+struct POIProofProgressEvent: Sendable {
+    /// `"InProgress"` | `"AllProofsCompleted"` | `"Error"` | `"LoadingNextBatch"`.
+    let status: String
+    let chainId: Int
+    /// 0 – 100.
+    let progress: Double
+    let message: String?
+    let errorMessage: String?
+    let index: Int
+    let totalCount: Int
 }
 
 // MARK: - Live Implementation
@@ -680,6 +702,63 @@ final class LiveWalletService: WalletServiceProtocol {
         }
     }
 
+    func getPOINodeURLs() async throws -> [String] {
+        struct Response: Decodable { let urls: [String] }
+        let result = try await bridge.call("getPOINodeURLs", as: Response.self)
+        return result.urls
+    }
+
+    func generatePOIProofs(chainName: String, walletID: String) async throws {
+        struct Response: Decodable { let submitted: Bool }
+        _ = try await bridge.call(
+            "generatePOIProofs",
+            params: [
+                "chainName": chainName,
+                "railgunWalletID": walletID,
+            ],
+            as: Response.self,
+            // Proof generation + submission can legitimately take minutes for
+            // wallets with many pre-POI commitments; give it plenty of room.
+            timeout: .seconds(600)
+        )
+    }
+
+    func setOnPOIProofProgress(_ handler: @escaping @Sendable (POIProofProgressEvent) -> Void) {
+        bridge.onEvent("poiProofProgress") { data in
+            guard let dict = data as? [String: Any] else { return }
+            let status = (dict["status"] as? String) ?? ""
+            let chainId = Self.asInt(dict["chain"].flatMap { ($0 as? [String: Any])?["id"] })
+                ?? Self.asInt(dict["chainId"])
+                ?? 0
+            let progress = Self.asDouble(dict["progress"]) ?? 0
+            let index = Self.asInt(dict["index"]) ?? 0
+            let totalCount = Self.asInt(dict["totalCount"]) ?? 0
+            handler(POIProofProgressEvent(
+                status: status,
+                chainId: chainId,
+                progress: progress,
+                message: dict["listKey"] as? String,
+                errorMessage: dict["errMessage"] as? String,
+                index: index,
+                totalCount: totalCount
+            ))
+        }
+    }
+
+    private nonisolated static func asInt(_ any: Any?) -> Int? {
+        if let i = any as? Int { return i }
+        if let d = any as? Double { return Int(d) }
+        if let s = any as? String { return Int(s) }
+        return nil
+    }
+
+    private nonisolated static func asDouble(_ any: Any?) -> Double? {
+        if let d = any as? Double { return d }
+        if let i = any as? Int { return Double(i) }
+        if let s = any as? String { return Double(s) }
+        return nil
+    }
+
     // MARK: - Native Unshield (uses Swift scanner, bypasses SDK scanning)
 
     func unshieldWithNativeScanner(
@@ -712,11 +791,13 @@ final class LiveWalletService: WalletServiceProtocol {
             onStatusUpdate?("Building merkle tree: \(inserted)/\(total)")
         }
 
+        let poiActive = Chain(rawValue: chainName)?.isPOIActive ?? false
         let proofInputs = try await Task.detached(priority: .userInitiated) {
             try ProofAssembler.assembleUnshield(
                 scanner: scanner,
                 tokenAddress: tokenAddress,
-                amount: BigUInt(amount) ?? 0
+                amount: BigUInt(amount) ?? 0,
+                poiActive: poiActive
             )
         }.value
 
@@ -921,11 +1002,13 @@ final class LiveWalletService: WalletServiceProtocol {
             onStep(.generatingProof)
         }
 
+        let poiActive = Chain(rawValue: chainName)?.isPOIActive ?? false
         let proofInputs = try await Task.detached(priority: .userInitiated) {
             try ProofAssembler.assembleUnshield(
                 scanner: scanner,
                 tokenAddress: tokenAddress,
-                amount: BigUInt(amount) ?? 0
+                amount: BigUInt(amount) ?? 0,
+                poiActive: poiActive
             )
         }.value
 

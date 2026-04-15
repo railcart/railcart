@@ -7,6 +7,7 @@ import {
   getFallbackProviderForNetwork,
   setOnUTXOMerkletreeScanCallback,
   setOnTXIDMerkletreeScanCallback,
+  setOnWalletPOIProofProgressCallback,
 } from "@railgun-community/wallet";
 import * as snarkjs from "snarkjs";
 import leveldown from "leveldown";
@@ -15,6 +16,11 @@ import path from "path";
 import { loadRemoteConfig, getCachedRemoteConfig } from "./remote-config.js";
 
 let engineInitialized = false;
+
+// POI aggregator URLs resolved during initEngine (from remote config, with
+// fallback). Exposed to Swift via the `getPOINodeURLs` bridge method so the
+// native scanner doesn't need to duplicate the remote-config bootstrap.
+let resolvedPOINodeURLs = [];
 
 // Per-chain provider state for rotation/retry.
 // candidates: all available providers (from remote config or custom)
@@ -161,6 +167,8 @@ export function registerEngineInitMethods() {
       process.stderr.write(`[sync] Remote config fetch failed, using fallback POI URL: ${err?.message || err}\n`);
     }
 
+    resolvedPOINodeURLs = poiNodeURLs;
+
     await startRailgunEngine(
       "rgwallet",       // walletSource (max 16 chars, lowercase)
       db,
@@ -195,6 +203,13 @@ export function registerEngineInitMethods() {
       });
     });
 
+    // Forward POI proof generation progress to Swift. Fires during
+    // `generatePOIProofs` as legacy/transact/unshield proofs are built and
+    // submitted to the POI aggregator.
+    setOnWalletPOIProofProgressCallback((poiProofEvent) => {
+      sendEvent("poiProofProgress", poiProofEvent);
+    });
+
     setOnTXIDMerkletreeScanCallback(({ scanStatus, chain, progress }) => {
       if (scanStatus === "Started") {
         process.stderr.write(`[sync] TXID merkletree scan started (chain ${chain.id})\n`);
@@ -213,6 +228,17 @@ export function registerEngineInitMethods() {
     process.stderr.write(`[sync] Engine initialized, data dir: ${dataDir}\n`);
     sendEvent("engineInitialized", {});
     return { initialized: true, dataDir };
+  });
+
+  /**
+   * Return the POI aggregator URLs resolved at engine-init time.
+   * Used by the native scanner to query the POI node directly.
+   */
+  registerMethod("getPOINodeURLs", async () => {
+    if (!engineInitialized) {
+      throw new Error("Engine not initialized. Call initEngine first.");
+    }
+    return { urls: resolvedPOINodeURLs };
   });
 
   /**

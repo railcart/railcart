@@ -20,7 +20,7 @@ public struct UTXO: Sendable, Identifiable {
     public let tokenHash: BigUInt
     public let value: BigUInt
     public let random: Data            // 16 bytes
-    public let masterPublicKey: BigUInt
+    public var masterPublicKey: BigUInt
 
     /// Whether this was received (false) or sent by us (true).
     public let isSentNote: Bool
@@ -34,6 +34,21 @@ public struct UTXO: Sendable, Identifiable {
 
     /// The commitment type (shield vs transact).
     public let commitmentType: CommitmentType
+
+    /// POI blinded commitment: `poseidon([hash, npk, globalTreePosition])`.
+    /// Set by `Scanner` after the UTXO is created. Stable for the lifetime of
+    /// the UTXO (doesn't depend on POI node state).
+    public var blindedCommitment: String?
+
+    /// Balance bucket derived from POI node response. Defaults to `.spendable`
+    /// on non-POI chains; set to the real bucket after the POI node is queried.
+    public var balanceBucket: WalletBalanceBucket = .spendable
+
+    /// Whether this UTXO is a "change" output (sent to self). Used to
+    /// distinguish `missingInternalPOI` vs `missingExternalPOI`.
+    /// We approximate this with `isSentNote` since our native scanner doesn't
+    /// track the SDK's explicit OutputType.
+    public var isChange: Bool { isSentNote }
 }
 
 /// Aggregated balance for a single token.

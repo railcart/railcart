@@ -87,4 +87,7 @@ struct MockWalletService: WalletServiceProtocol {
 
     func loadChainProvider(chainName: String, providerUrl: String) async throws {}
     func loadChainProviderFromRemoteConfig(chainName: String) async throws {}
+    func getPOINodeURLs() async throws -> [String] { [] }
+    func generatePOIProofs(chainName: String, walletID: String) async throws {}
+    func setOnPOIProofProgress(_ handler: @escaping @Sendable (POIProofProgressEvent) -> Void) {}
 }

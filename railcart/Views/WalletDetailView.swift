@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import RailcartCrypto
 
 struct WalletDetailView: View {
     @Environment(\.balanceService) private var balanceService
@@ -82,9 +83,25 @@ struct WalletDetailView: View {
                         onShield: { token in shieldToken = token }
                     )
 
-                    let pendingShields = pendingShieldTransactions(for: wallet)
-                    if !pendingShields.isEmpty {
-                        PendingShieldView(transactions: pendingShields)
+                    let pendingRows = pendingPOIRows(for: wallet)
+                    if !pendingRows.isEmpty {
+                        let chainName = network.selectedChain.rawValue
+                        let allWalletIDs = walletState.wallets.map(\.id)
+                        let effective = balanceService?.nativeScanner.effectivePOIProofGen(
+                            chainName: chainName, walletIDs: allWalletIDs
+                        ) ?? .idle
+                        PendingShieldView(
+                            rows: pendingRows,
+                            poiStatus: balanceService?.nativeScanner.poiStatus[chainName] ?? .idle,
+                            onRetry: network.selectedChain.isPOIActive
+                                ? { Task { await refreshPOI() } }
+                                : nil,
+                            canGenerateProofs: hasMissingPOIProofRows(pendingRows),
+                            proofGen: effective,
+                            onGenerateProofs: network.selectedChain.isPOIActive
+                                ? { Task { await submitPOIProofs() } }
+                                : nil
+                        )
                     }
 
                     PrivateBalanceSection(
@@ -216,6 +233,35 @@ struct WalletDetailView: View {
         }
     }
 
+    /// User-initiated POI re-check from the middle section.
+    private func refreshPOI() async {
+        guard let balanceService else { return }
+        await balanceService.refreshPOIStatus(
+            chainName: network.selectedChain.rawValue,
+            wallets: walletState.wallets
+        )
+    }
+
+    /// User-initiated POI proof generation + submission.
+    private func submitPOIProofs() async {
+        guard let balanceService else { return }
+        await balanceService.generatePOIProofs(
+            chainName: network.selectedChain.rawValue,
+            wallets: walletState.wallets
+        )
+    }
+
+    /// Whether any pending row is in a missing-POI-proof bucket — i.e. the
+    /// SDK can potentially generate and submit proofs for those UTXOs.
+    private func hasMissingPOIProofRows(_ rows: [PendingPOIRow]) -> Bool {
+        rows.contains { row in
+            if case .status(let label, _) = row.indicator {
+                return label == "Missing POI proof"
+            }
+            return false
+        }
+    }
+
     /// Force-refresh private balances for all wallets (invalidates cache first).
     private func refreshPrivateBalances() async {
         guard let balanceService else { return }
@@ -233,15 +279,107 @@ struct WalletDetailView: View {
         return publicTokenBalances[addr.lowercased()]
     }
 
-    /// Shield transactions from this wallet on the current chain within the last hour.
-    private func pendingShieldTransactions(for wallet: Wallet) -> [Transaction] {
-        let cutoff = Date().addingTimeInterval(-3600)
-        return transactionStore.transactions.filter { tx in
-            tx.action == .shield
-                && tx.chainName == network.selectedChain.rawValue
-                && tx.fromWalletID == wallet.id
-                && tx.timestamp > cutoff
+    /// Rows for the middle "Waiting for Proof of Innocence" section.
+    ///
+    /// Combines two data sources:
+    ///
+    /// 1. Scanner-derived pending UTXOs (source of truth for everything the
+    ///    scanner has indexed, including received transacts and UTXOs from
+    ///    imported/legacy wallets that have no local Transaction record).
+    /// 2. Local shield Transactions under 1 hour old that the scanner hasn't
+    ///    indexed yet — so freshly submitted shields show up immediately with
+    ///    the countdown, before the next scan catches them.
+    private func pendingPOIRows(for wallet: Wallet) -> [PendingPOIRow] {
+        let chain = network.selectedChain.rawValue
+        let scanner = balanceService?.nativeScanner
+        let entries = scanner?.pendingPOIEntries(chainName: chain, walletID: wallet.id) ?? []
+        let shieldStatus = scanner?.shieldTxStatus(chainName: chain, walletID: wallet.id)
+        let knownTxids = shieldStatus?.known ?? []
+
+        // Index local shield transactions by normalized txid for the countdown case.
+        let localShieldsByTxid: [String: Transaction] = Dictionary(
+            uniqueKeysWithValues: transactionStore.transactions
+                .filter { $0.action == .shield && $0.chainName == chain && $0.fromWalletID == wallet.id }
+                .map { (Self.normalizedTxHash($0.txHash), $0) }
+        )
+
+        var rows: [PendingPOIRow] = []
+
+        // Scanner-derived entries (authoritative).
+        for entry in entries {
+            let rowID = "scan-\(entry.id)"
+            // Prefer countdown for shields with a known submit time.
+            if entry.isShield, let tx = localShieldsByTxid[entry.txid] {
+                rows.append(makeRow(id: rowID, from: entry, indicator: .countdown(since: tx.timestamp)))
+            } else {
+                let (label, image) = bucketPresentation(entry.bucket)
+                rows.append(makeRow(id: rowID, from: entry, indicator: .status(label, systemImage: image)))
+            }
         }
+
+        // Local shields the scanner hasn't indexed yet — keep 1h countdown fallback.
+        let cutoff = Date().addingTimeInterval(-3600)
+        for (txid, tx) in localShieldsByTxid where !knownTxids.contains(txid) {
+            if tx.timestamp <= cutoff { continue }
+            let token = Token.supported.first { $0.symbol == tx.tokenSymbol } ?? .eth
+            rows.append(PendingPOIRow(
+                id: "local-\(chain)-\(txid)",
+                token: token,
+                tokenDisplay: tx.tokenSymbol,
+                amountRaw: rawAmount(from: tx.amount, token: token),
+                actionLabel: "Shield",
+                actionColor: .blue,
+                txHash: tx.txHash,
+                indicator: .countdown(since: tx.timestamp)
+            ))
+        }
+
+        return rows
+    }
+
+    private func makeRow(
+        id: String,
+        from entry: NativeScannerService.PendingPOI,
+        indicator: PendingPOIRow.Indicator
+    ) -> PendingPOIRow {
+        let (label, color): (String, Color) = entry.isShield
+            ? ("Shield", .blue)
+            : ("Received", .purple)
+        return PendingPOIRow(
+            id: id,
+            token: entry.token,
+            tokenDisplay: entry.tokenDisplay,
+            amountRaw: entry.amountRaw,
+            actionLabel: label,
+            actionColor: color,
+            txHash: "0x" + entry.txid,
+            indicator: indicator
+        )
+    }
+
+    private func bucketPresentation(_ bucket: WalletBalanceBucket) -> (String, String) {
+        switch bucket {
+        case .shieldPending: ("Verifying shield", "hourglass")
+        case .shieldBlocked: ("Shield blocked", "xmark.shield")
+        case .missingInternalPOI: ("Missing POI proof", "exclamationmark.triangle")
+        case .missingExternalPOI: ("Missing POI proof", "exclamationmark.triangle")
+        case .proofSubmitted: ("Proof submitted", "paperplane")
+        case .spendable, .spent: ("", "")
+        }
+    }
+
+    /// Convert a human-readable amount (e.g. "0.5") back to smallest units
+    /// for consistent display by `Token.formatBalance`.
+    private func rawAmount(from human: String, token: Token) -> String {
+        guard let value = Decimal(string: human) else { return "0" }
+        let raw = value * pow(Decimal(10), token.decimals)
+        return NSDecimalNumber(decimal: raw).stringValue
+    }
+
+    private static func normalizedTxHash(_ raw: String) -> String {
+        var h = raw.lowercased()
+        if h.hasPrefix("0x") { h.removeFirst(2) }
+        return h
     }
 }
 

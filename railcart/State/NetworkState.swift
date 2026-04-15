@@ -36,6 +36,15 @@ enum Chain: String, CaseIterable, Identifiable, Sendable {
     var isTestnet: Bool {
         self == .sepolia
     }
+
+    /// Whether POI (Proof of Innocence) is enforced for spending on this chain.
+    /// Only `.spendable` UTXOs may be selected for transactions when true.
+    var isPOIActive: Bool {
+        switch self {
+        case .ethereum: true
+        case .sepolia: false
+        }
+    }
 }
 
 @MainActor

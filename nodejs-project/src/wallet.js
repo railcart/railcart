@@ -337,6 +337,67 @@ export function registerWalletMethods() {
   });
 
   /**
+   * Generate and submit POI proofs for the wallet's UTXOs. Triggers the
+   * SDK's full POI pipeline for this wallet+chain:
+   *   - Refresh POI status for received TXOs
+   *   - Submit legacy transact POI events for pre-POI-era received commitments
+   *   - Refresh POI status for sent commitments/unshields
+   *   - Generate and submit POI proofs for sent commitments/unshields
+   *
+   * Progress is streamed via the `poiProofProgress` event (see
+   * `setOnWalletPOIProofProgressCallback` registered in engine-init).
+   *
+   * params: { chainName: string, railgunWalletID: string }
+   */
+  registerMethod("generatePOIProofs", async (params) => {
+    requireEngine();
+    const { chainName, railgunWalletID } = params;
+    if (!railgunWalletID) {
+      throw new Error("Missing railgunWalletID");
+    }
+    const { chain } = chainForName(chainName);
+    const startTime = Date.now();
+    process.stderr.write(
+      `[poi] Starting POI proof generation for ${chainName} wallet ${railgunWalletID.slice(0, 8)}...\n`
+    );
+    try {
+      // Native scanning skips the SDK's scan path, so the SDK wallet's
+      // TXO set doesn't include anything that landed since wallet load.
+      // `refreshPOIsForTXIDVersion` reads from that set, so we sync it
+      // first or recent commitments would be silently skipped.
+      await refreshBalances(chain, [railgunWalletID]);
+
+      // The SDK's top-level `generatePOIsForWallet` → `refreshPOIsForAllTXIDVersions`
+      // iterates txid versions but deliberately does NOT await each inner
+      // `refreshPOIsForTXIDVersion` call. That makes the public API
+      // fire-and-forget: it resolves in milliseconds while the real proof
+      // work (refresh received POIs, submit legacy transact POI events,
+      // refresh spent POIs, generate + submit transact proofs) runs
+      // detached in the background — we never see completion, errors, or
+      // progress events we can act on.
+      //
+      // Bypass by calling the inner method directly with forceRefresh=true
+      // (forceRefresh also skips the dedup guard that would no-op this
+      // click if any prior SDK refresh is still flagged in-flight).
+      const wallet = walletForID(railgunWalletID);
+      await wallet.refreshPOIsForTXIDVersion(
+        chain,
+        TXIDVersion.V2_PoseidonMerkle,
+        true /* forceRefresh */
+      );
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(`[poi] POI proof generation complete in ${elapsed}s\n`);
+      return { submitted: true };
+    } catch (err) {
+      const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+      process.stderr.write(
+        `[poi] POI proof generation failed after ${elapsed}s: ${err?.message || err}\n`
+      );
+      throw err;
+    }
+  });
+
+  /**
    * Full merkletree rescan — re-processes all local data from scratch.
    * Slow but thorough. Use for first-time setup or imported wallets.
    *

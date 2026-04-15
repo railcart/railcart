@@ -50,10 +50,15 @@ public enum ProofAssembler {
     ///
     /// The bridge method handles output notes, encryption, and signing.
     /// We just provide selected UTXOs with merkle proofs.
+    ///
+    /// - Parameter poiActive: When true (POI-enabled chains), only UTXOs with
+    ///   `balanceBucket == .spendable` are considered. When false, every
+    ///   non-spent UTXO is eligible (pre-POI behavior).
     public static func assembleUnshield(
         scanner: Scanner,
         tokenAddress: String,
-        amount: BigUInt
+        amount: BigUInt,
+        poiActive: Bool = false
     ) throws -> ProofInputs {
         // Token hash for ERC20 is the address as a BigUInt (zero-padded to 32 bytes)
         let addrHex = tokenAddress.lowercased().hasPrefix("0x")
@@ -64,7 +69,8 @@ public enum ProofAssembler {
         let selected = try selectUTXOs(
             from: scanner.utxos,
             tokenHash: tokenHash,
-            amount: amount
+            amount: amount,
+            poiActive: poiActive
         )
 
         guard let tree = selected.first?.tree else {
@@ -100,13 +106,24 @@ public enum ProofAssembler {
     }
 
     /// Select UTXOs to cover `amount` for a given token.
+    ///
+    /// - Parameter poiActive: When true, only `.spendable` UTXOs are eligible;
+    ///   UTXOs in any other bucket (ShieldPending, ShieldBlocked, Missing*POI)
+    ///   are filtered out. Use for POI-enabled chains like Ethereum mainnet.
     public static func selectUTXOs(
         from utxos: [UTXO],
         tokenHash: BigUInt,
-        amount: BigUInt
+        amount: BigUInt,
+        poiActive: Bool = false
     ) throws -> [UTXO] {
         let spendable = utxos
-            .filter { $0.tokenHash == tokenHash && !$0.isSpent && !$0.isSentNote && $0.value > 0 }
+            .filter { utxo in
+                utxo.tokenHash == tokenHash
+                    && !utxo.isSpent
+                    && !utxo.isSentNote
+                    && utxo.value > 0
+                    && (!poiActive || utxo.balanceBucket == .spendable)
+            }
             .sorted { $0.value > $1.value }
 
         guard !spendable.isEmpty else { throw Error.noSpendableUTXOs }

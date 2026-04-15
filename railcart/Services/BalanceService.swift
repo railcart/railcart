@@ -36,6 +36,10 @@ final class BalanceService {
     // Cache keyed by "chain:walletID" for private balances
     private var privateBalanceCache: [String: CacheEntry<[TokenBalance]>] = [:]
 
+    // POI aggregator URLs (resolved by the Node.js engine-init from remote config).
+    // Fetched once lazily; the list rarely changes during a session.
+    private var cachedPOINodeURLs: [URL]?
+
     // MARK: - Observable scan state
 
     /// Whether a private balance scan is currently running.
@@ -58,6 +62,56 @@ final class BalanceService {
     init(walletService: any WalletServiceProtocol) {
         self.walletService = walletService
         self.nativeScanner = NativeScannerService()
+        nativeScanner.restorePersistedPOIProofState()
+        subscribeToPOIProofProgress()
+    }
+
+    /// Wire the bridge's `poiProofProgress` stream into the scanner's
+    /// observable proof-generation state. Called once per service lifetime.
+    ///
+    /// The SDK fires `poiProofProgress` events from *any* `refreshPOIsForTXIDVersion`
+    /// invocation, not only our explicit `generatePOIProofs` submission — it
+    /// runs at the end of balance decryption, provider loads, and a few other
+    /// internal flows. We only want to react when the user has initiated a
+    /// submission, so every event is gated on the chain being in `.running`
+    /// state. The terminal `.succeeded` transition is owned by
+    /// `generatePOIProofs` itself so SDK-internal refreshes can't clobber the
+    /// persisted submission timestamp.
+    private func subscribeToPOIProofProgress() {
+        walletService.setOnPOIProofProgress { [weak self] event in
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                guard let chainName = Chain.allCases.first(where: { $0.chainId == event.chainId })?.rawValue else {
+                    return
+                }
+                // Ignore SDK events unless we're mid-submission for this
+                // chain. Prevents SDK-internal POI refreshes from flashing
+                // progress state or resetting the submit timestamp.
+                guard case .running = self.nativeScanner.poiProofGen[chainName] else { return }
+
+                switch event.status {
+                case "AllProofsCompleted":
+                    // Owned by generatePOIProofs — ignore to protect the
+                    // persisted submission timestamp.
+                    break
+                case "Error":
+                    let msg = event.errorMessage ?? "Proof generation failed"
+                    self.nativeScanner.setPOIProofGen(chainName: chainName, .failed(message: msg, at: Date()))
+                default:
+                    // Map 0–100 SDK progress onto 0–1 for UI.
+                    let step = event.totalCount > 0
+                        ? " (\(event.index)/\(event.totalCount))"
+                        : ""
+                    let message = "Generating POI proofs\(step)"
+                    self.nativeScanner.applyPOIProofProgress(
+                        chainName: chainName,
+                        progress: event.progress / 100,
+                        status: nil,
+                        message: message
+                    )
+                }
+            }
+        }
     }
 
     // MARK: - Public ETH Balance
@@ -140,7 +194,14 @@ final class BalanceService {
                 }
             }
 
-            await nativeScanner.scanAllWallets(chainName: chainName, walletIDs: walletIDs)
+            // Only query the POI aggregator on chains where POI is active;
+            // non-POI chains (Sepolia) have no POI concept and the aggregator
+            // returns Missing for everything, landing UTXOs in the wrong
+            // bucket.
+            let poiURLs: [URL] = Chain(rawValue: chainName)?.isPOIActive == true
+                ? await resolvedPOINodeURLs()
+                : []
+            await nativeScanner.scanAllWallets(chainName: chainName, walletIDs: walletIDs, poiNodeURLs: poiURLs)
             progressTask.cancel()
 
             // Cache results from native scanner
@@ -276,6 +337,101 @@ final class BalanceService {
         ethBalanceCache.removeAll()
         erc20BalanceCache.removeAll()
         privateBalanceCache.removeAll()
+    }
+
+    // MARK: - POI
+
+    /// Resolve POI aggregator URLs via the bridge. Returns `[]` on any failure
+    /// so scanning degrades gracefully (UTXOs keep their default `.spendable`
+    /// bucket, same as pre-POI behavior).
+    private func resolvedPOINodeURLs() async -> [URL] {
+        if let cached = cachedPOINodeURLs { return cached }
+        do {
+            let urls = try await walletService.getPOINodeURLs().compactMap { URL(string: $0) }
+            cachedPOINodeURLs = urls
+            return urls
+        } catch {
+            AppLogger.shared.log("native-scan", "getPOINodeURLs failed: \(error.localizedDescription)")
+            return []
+        }
+    }
+
+    /// Trigger POI proof generation + submission for every wallet on this
+    /// chain. Runs the SDK's `generatePOIsForWallet` pipeline (refresh received
+    /// POI status, submit legacy transact POI events, refresh spent POI status,
+    /// auto-generate and submit transact/unshield POI proofs). Progress is
+    /// streamed through `nativeScanner.poiProofGen[chainName]` via the
+    /// `poiProofProgress` bridge event. After submission, re-queries POI
+    /// statuses so any newly-`Valid` UTXOs hit token cards immediately.
+    func generatePOIProofs(chainName: String, wallets: [Wallet]) async {
+        guard !wallets.isEmpty else { return }
+        guard Chain(rawValue: chainName)?.isPOIActive == true else { return }
+        if case .running = nativeScanner.poiProofGen[chainName] { return }
+
+        // Snapshot which blinded commitments are Missing at submit time so
+        // we can detect later if new Missing ones arrive (e.g. another
+        // broadcaster tx post-submit).
+        let walletIDs = wallets.map(\.id)
+        let snapshot = nativeScanner.missingPOIBlindedCommitments(
+            chainName: chainName, walletIDs: walletIDs
+        )
+
+        nativeScanner.setPOIProofGen(
+            chainName: chainName,
+            .running(progress: 0, message: "Starting POI proof generation…")
+        )
+
+        do {
+            for wallet in wallets {
+                try await walletService.generatePOIProofs(chainName: chainName, walletID: wallet.id)
+            }
+            // SDK may not emit AllProofsCompleted for every flow (e.g. no
+            // proofs to generate). Set a successful terminal state here as
+            // a fallback; a later AllProofsCompleted event is harmless.
+            nativeScanner.setPOIProofGen(
+                chainName: chainName,
+                .succeeded(at: Date()),
+                submittedBlindedCommitments: snapshot
+            )
+        } catch {
+            nativeScanner.setPOIProofGen(
+                chainName: chainName,
+                .failed(message: error.localizedDescription, at: Date())
+            )
+            return
+        }
+
+        // Pull fresh statuses so any newly-Valid UTXOs show up in token cards.
+        await refreshPOIStatus(chainName: chainName, wallets: wallets)
+    }
+
+    /// User-initiated POI refresh without a full scan. Re-queries the POI
+    /// aggregator for existing UTXOs and repopulates the private balance
+    /// cache so newly-spendable funds appear in token cards without waiting
+    /// for the next 30 min cache refresh.
+    func refreshPOIStatus(chainName: String, wallets: [Wallet]) async {
+        guard !wallets.isEmpty else { return }
+        // Only makes sense on POI-active chains — on testnets the scanner
+        // leaves every UTXO as .spendable so there's nothing to update.
+        guard Chain(rawValue: chainName)?.isPOIActive == true else { return }
+        // If a POI query is already in flight (via scan or earlier retry),
+        // don't stampede. The caller's observable state will pick up the
+        // result of the running query.
+        if case .querying = nativeScanner.poiStatus[chainName] { return }
+
+        let urls = await resolvedPOINodeURLs()
+        guard !urls.isEmpty else { return }
+
+        let walletIDs = wallets.map(\.id)
+        await nativeScanner.refreshPOIStatuses(
+            chainName: chainName, walletIDs: walletIDs, poiNodeURLs: urls
+        )
+
+        // Repopulate caches so token cards pick up any bucket changes.
+        for walletID in walletIDs {
+            let balances = nativeScanner.getPrivateBalances(chainName: chainName, walletID: walletID)
+            privateBalanceCache["\(chainName):\(walletID)"] = CacheEntry(value: balances, timestamp: Date())
+        }
     }
 }
 

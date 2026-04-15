@@ -22,6 +22,9 @@ struct ContentView: View {
         case wallet(String)  // wallet ID
         case transactions
         case settings
+        #if DEBUG
+        case proofs
+        #endif
     }
 
     var body: some View {
@@ -35,10 +38,15 @@ struct ContentView: View {
                         }
                     }
                 }
-                Section("Actions") {
+                Section("Info") {
                     NavigationLink(value: SidebarItem.transactions) {
                         Label("Transactions", systemImage: "clock")
                     }
+                    #if DEBUG
+                    NavigationLink(value: SidebarItem.proofs) {
+                        Label("Proofs", systemImage: "ladybug")
+                    }
+                    #endif
                 }
             }
             .safeAreaInset(edge: .bottom) {
@@ -74,6 +82,10 @@ struct ContentView: View {
                 TransactionListView()
             case .settings:
                 SettingsView()
+            #if DEBUG
+            case .proofs:
+                ProofsDebugView()
+            #endif
             case nil:
                 if let error = bridge.errorMessage {
                     ContentUnavailableView {
