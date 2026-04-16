@@ -13,6 +13,7 @@ import SwiftUI
 struct ReplaceCoreMnemonicView: View {
     @Environment(\.walletService) private var service
     @Environment(\.balanceService) private var balanceService
+    @Environment(\.keychain) private var keychain
     @Environment(WalletState.self) private var walletState
     @Environment(NetworkState.self) private var network
     @Environment(\.dismiss) private var dismiss
@@ -92,7 +93,7 @@ struct ReplaceCoreMnemonicView: View {
     }
 
     private func replace() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             errorMessage = "Wallet must be unlocked first."
             return
         }
@@ -118,7 +119,7 @@ struct ReplaceCoreMnemonicView: View {
                 creationBlockNumbers: [:]
             )
 
-            try KeychainHelper.save(.walletID, value: walletInfo.id)
+            try keychain.save(.walletID, value: walletInfo.id)
 
             let newWallet = Wallet(
                 id: walletInfo.id,

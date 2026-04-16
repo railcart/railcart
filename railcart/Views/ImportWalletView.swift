@@ -9,6 +9,7 @@ import SwiftUI
 
 struct ImportWalletView: View {
     @Environment(\.walletService) private var service
+    @Environment(\.keychain) private var keychain
     @Environment(WalletState.self) private var walletState
     @Environment(\.dismiss) private var dismiss
 
@@ -106,7 +107,7 @@ struct ImportWalletView: View {
     }
 
     private func importWallet() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             errorMessage = "Wallet must be unlocked first."
             return
         }

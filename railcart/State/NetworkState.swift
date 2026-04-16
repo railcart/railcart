@@ -73,7 +73,7 @@ final class NetworkState {
     private static let customRPCKey = "network.customRPCURLs"
 
     init() {
-        if let dict = UserDefaults.standard.dictionary(forKey: Self.customRPCKey) as? [String: String] {
+        if let dict = RailcartDefaults.store.dictionary(forKey: Self.customRPCKey) as? [String: String] {
             for (key, value) in dict {
                 if let chain = Chain(rawValue: key) {
                     customRPCURLs[chain] = value
@@ -132,6 +132,6 @@ final class NetworkState {
 
     private func persistCustomRPCURLs() {
         let dict = Dictionary(uniqueKeysWithValues: customRPCURLs.map { ($0.key.rawValue, $0.value) })
-        UserDefaults.standard.set(dict, forKey: Self.customRPCKey)
+        RailcartDefaults.store.set(dict, forKey: Self.customRPCKey)
     }
 }

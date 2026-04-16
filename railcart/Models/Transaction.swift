@@ -37,7 +37,7 @@ struct Transaction: Codable, Identifiable, Sendable {
     private static let storageKey = "wallet.transactions"
 
     static func loadAll() -> [Transaction] {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
+        guard let data = RailcartDefaults.store.data(forKey: storageKey),
               let txs = try? JSONDecoder().decode([Transaction].self, from: data) else {
             return []
         }
@@ -46,7 +46,7 @@ struct Transaction: Codable, Identifiable, Sendable {
 
     static func saveAll(_ transactions: [Transaction]) {
         if let data = try? JSONEncoder().encode(transactions) {
-            UserDefaults.standard.set(data, forKey: storageKey)
+            RailcartDefaults.store.set(data, forKey: storageKey)
         }
     }
 }

@@ -11,6 +11,7 @@ config-example.json
 xcuserdata/
 *.xcscmblueprint
 DerivedData/
+*.profraw
 
 # macOS
 .DS_Store

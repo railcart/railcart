@@ -11,6 +11,7 @@ struct ContentView: View {
     @Environment(NodeBridge.self) private var bridge
     @Environment(\.walletService) private var service
     @Environment(\.balanceService) private var balanceService
+    @Environment(\.keychain) private var keychain
     @Environment(NetworkState.self) private var network
     @Environment(WalletState.self) private var walletState
     @Environment(UpdateController.self) private var updateController
@@ -43,8 +44,10 @@ struct ContentView: View {
                         Label("Transactions", systemImage: "clock")
                     }
                     #if DEBUG
-                    NavigationLink(value: SidebarItem.proofs) {
-                        Label("Proofs", systemImage: "ladybug")
+                    if RailcartApp.demoScenario == nil {
+                        NavigationLink(value: SidebarItem.proofs) {
+                            Label("Proofs", systemImage: "ladybug")
+                        }
                     }
                     #endif
                 }
@@ -185,7 +188,7 @@ struct ContentView: View {
         .toolbar {
             ToolbarItem(placement: .automatic) {
                 Button {
-                    Task { await walletState.addWallet(using: service) }
+                    Task { await walletState.addWallet(using: service, keychain: keychain) }
                 } label: {
                     Label("Add Wallet", systemImage: "plus")
                         .labelStyle(.titleAndIcon)

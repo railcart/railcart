@@ -9,6 +9,7 @@ import SwiftUI
 
 struct WalletSetupView: View {
     @Environment(\.walletService) private var service
+    @Environment(\.keychain) private var keychain
     @Environment(WalletState.self) private var wallet
 
     @State private var password = ""
@@ -146,7 +147,7 @@ struct WalletSetupView: View {
                 .disabled(password.isEmpty || isWorking)
                 .buttonStyle(.borderedProminent)
 
-                if KeychainHelper.hasKey(.encryptionKey) && KeychainHelper.canUseBiometry {
+                if keychain.hasKey(.encryptionKey) && keychain.canUseBiometry {
                     Button {
                         Task { await unlockWithBiometry() }
                     } label: {
@@ -163,7 +164,7 @@ struct WalletSetupView: View {
             }
         }
         .task {
-            if KeychainHelper.hasKey(.encryptionKey) && KeychainHelper.canUseBiometry {
+            if keychain.hasKey(.encryptionKey) && keychain.canUseBiometry {
                 while !NSApp.isActive {
                     try? await Task.sleep(for: .milliseconds(200))
                 }
@@ -175,11 +176,11 @@ struct WalletSetupView: View {
     // MARK: - Actions
 
     private func checkExistingWallet() {
-        if wallet.wallets.isEmpty && KeychainHelper.hasKey(.walletID) {
+        if wallet.wallets.isEmpty && keychain.hasKey(.walletID) {
             // Wallet list was lost (e.g. UserDefaults cleared) but Keychain still has
             // the wallet ID. Reconstruct a placeholder wallet so the unlock flow can
             // load it from the RAILGUN SDK.
-            if let walletID = KeychainHelper.load(.walletID) {
+            if let walletID = keychain.load(.walletID) {
                 let recovered = Wallet(
                     id: walletID,
                     derivationIndex: 0,
@@ -228,9 +229,9 @@ struct WalletSetupView: View {
                 creationBlockNumbers: creationBlocks
             )
 
-            try KeychainHelper.save(.walletID, value: walletInfo.id)
-            try KeychainHelper.save(.walletSalt, value: salt)
-            try? KeychainHelper.save(.encryptionKey, value: encryptionKey)
+            try keychain.save(.walletID, value: walletInfo.id)
+            try keychain.save(.walletSalt, value: salt)
+            try? keychain.save(.encryptionKey, value: encryptionKey)
 
             let newWallet = Wallet(
                 id: walletInfo.id,
@@ -254,9 +255,9 @@ struct WalletSetupView: View {
     }
 
     private func unlockWithBiometry() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else { return }
+        guard let encryptionKey = keychain.load(.encryptionKey) else { return }
 
-        let authenticated = await KeychainHelper.authenticateWithBiometry(
+        let authenticated = await keychain.authenticateWithBiometry(
             reason: "Unlock your RAILGUN wallets"
         )
         guard authenticated else { return }
@@ -265,7 +266,7 @@ struct WalletSetupView: View {
     }
 
     private func unlockWallets() async {
-        guard let storedSalt = KeychainHelper.load(.walletSalt) else {
+        guard let storedSalt = keychain.load(.walletSalt) else {
             errorMessage = "No wallet found"
             wallet.setStep(.enterPassword)
             return
@@ -277,7 +278,7 @@ struct WalletSetupView: View {
 
         do {
             let encryptionKey = try await service.deriveEncryptionKey(password: password, salt: storedSalt)
-            try? KeychainHelper.save(.encryptionKey, value: encryptionKey)
+            try? keychain.save(.encryptionKey, value: encryptionKey)
             await loadAllWallets(encryptionKey: encryptionKey)
             password = ""
         } catch {

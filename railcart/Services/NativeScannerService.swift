@@ -311,9 +311,24 @@ final class NativeScannerService {
         )
     }
 
+    /// Demo-only override for `pendingPOIEntries`. Keyed by "walletID:chainName".
+    /// Live code never writes here; only `seedPendingPOIEntries` does.
+    private var pendingPOISeed: [String: [PendingPOI]] = [:]
+
+    /// Seed pending POI entries for demo/screenshot mode.
+    func seedPendingPOIEntries(chainName: String, walletID: String, entries: [PendingPOI]) {
+        pendingPOISeed["\(walletID):\(chainName)"] = entries
+    }
+
+    /// Seed POI fetch status for demo/screenshot mode.
+    func seedPOIStatus(chainName: String, _ status: POIFetchStatus) {
+        poiStatus[chainName] = status
+    }
+
     /// All owned UTXOs that aren't yet spendable, grouped by (txid, tokenHash).
     func pendingPOIEntries(chainName: String, walletID: String) -> [PendingPOI] {
         let scannerKey = "\(walletID):\(chainName)"
+        if let seeded = pendingPOISeed[scannerKey] { return seeded }
         guard let scanner = scanners[scannerKey] else { return [] }
 
         return scanner.pendingPOIEntries().map { entry in
@@ -439,7 +454,7 @@ final class NativeScannerService {
     /// Restore any persisted submission so the Submit button stays hidden
     /// across app restarts while proofs clear. Call once per service lifetime.
     func restorePersistedPOIProofState() {
-        let defaults = UserDefaults.standard
+        let defaults = RailcartDefaults.store
         let now = Date()
         for chain in Chain.allCases where chain.isPOIActive {
             // Clean up legacy timestamp-only key so the new-format data is
@@ -489,10 +504,10 @@ final class NativeScannerService {
             )
             poiProofSubmissions[chainName] = submission
             if let data = try? JSONEncoder().encode(submission) {
-                UserDefaults.standard.set(data, forKey: key)
+                RailcartDefaults.store.set(data, forKey: key)
             }
         } else if case .idle = newValue {
-            UserDefaults.standard.removeObject(forKey: key)
+            RailcartDefaults.store.removeObject(forKey: key)
             poiProofSubmissions.removeValue(forKey: chainName)
         }
     }

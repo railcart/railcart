@@ -25,10 +25,9 @@ struct Wallet: Codable, Identifiable, Sendable {
     // MARK: - Persistence
 
     private static let storageKey = "wallet.accounts"
-    static var defaults: UserDefaults = .standard
 
     static func loadAll() -> [Wallet] {
-        guard let data = defaults.data(forKey: storageKey),
+        guard let data = RailcartDefaults.store.data(forKey: storageKey),
               let wallets = try? JSONDecoder().decode([Wallet].self, from: data) else {
             return []
         }
@@ -37,7 +36,7 @@ struct Wallet: Codable, Identifiable, Sendable {
 
     static func saveAll(_ wallets: [Wallet]) {
         if let data = try? JSONEncoder().encode(wallets) {
-            defaults.set(data, forKey: storageKey)
+            RailcartDefaults.store.set(data, forKey: storageKey)
         }
     }
 }

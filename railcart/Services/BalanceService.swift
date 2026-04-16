@@ -24,6 +24,7 @@ private struct CacheEntry<T> {
 @Observable
 final class BalanceService {
     private let walletService: any WalletServiceProtocol
+    private let keychain: any KeychainProviding
     let nativeScanner: NativeScannerService
 
     private static let publicTTL: TimeInterval = 300      // 5 minutes
@@ -59,8 +60,9 @@ final class BalanceService {
     /// Last known scan progress per chain, so switching back shows the most recent value.
     private var lastProgress: [String: (step: String?, progress: Double)] = [:]
 
-    init(walletService: any WalletServiceProtocol) {
+    init(walletService: any WalletServiceProtocol, keychain: any KeychainProviding) {
         self.walletService = walletService
+        self.keychain = keychain
         self.nativeScanner = NativeScannerService()
         nativeScanner.restorePersistedPOIProofState()
         subscribeToPOIProofProgress()
@@ -232,6 +234,30 @@ final class BalanceService {
         walletIDs.allSatisfy { cachedPrivateBalances(chainName: chainName, walletID: $0) != nil }
     }
 
+    /// Pre-populate the private-balance cache without scanning. For demo mode only.
+    func seedPrivateBalances(chainName: String, walletID: String, balances: [TokenBalance]) {
+        let key = "\(chainName):\(walletID)"
+        privateBalanceCache[key] = CacheEntry(value: balances, timestamp: Date())
+    }
+
+    /// Pre-populate the public ETH cache without RPC calls. For demo mode only.
+    func seedEthBalance(chainName: String, address: String, balance: String) {
+        ethBalanceCache["\(chainName):\(address)"] = CacheEntry(value: balance, timestamp: Date())
+    }
+
+    /// Pre-populate the public ERC-20 cache without RPC calls. For demo mode only.
+    func seedERC20Balances(chainName: String, address: String, balances: [TokenBalance]) {
+        erc20BalanceCache["\(chainName):\(address)"] = CacheEntry(value: balances, timestamp: Date())
+    }
+
+    /// Show a frozen scan-in-progress UI state. For demo mode only.
+    func seedScanProgress(chainName: String, step: String, progress: Double) {
+        scanningChain = chainName
+        isScanning = true
+        scanStep = step
+        scanProgress = progress
+    }
+
     /// Incremented each time a new scan starts; listeners use this to reset their state.
     private(set) var scanGeneration = 0
 
@@ -313,7 +339,7 @@ final class BalanceService {
 
     /// Initialize the native scanner for a wallet by fetching its mnemonic.
     func initializeNativeScanner(wallet: Wallet) async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             AppLogger.shared.log("native-scan", "Cannot init scanner: no encryption key")
             return
         }

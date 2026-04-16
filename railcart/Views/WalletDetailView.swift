@@ -430,6 +430,6 @@ struct WalletDetailView: View {
         .environment(NetworkState())
         .environment(txStore)
         .environment(\.walletService, mockService)
-        .environment(\.balanceService, BalanceService(walletService: mockService))
+        .environment(\.balanceService, BalanceService(walletService: mockService, keychain: DemoKeychainProvider()))
         .frame(width: 580, height: 700)
 }

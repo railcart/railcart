@@ -63,6 +63,15 @@ final class NodeBridge {
         Bundle.main.path(forResource: "nodejs-project", ofType: nil)
     }
 
+    /// Mark the bridge as ready without spawning the Node.js process.
+    /// Used by demo/screenshot mode where state is pre-seeded and no
+    /// JSON-RPC calls should fire.
+    func enterDemoMode() {
+        isRunning = true
+        isReady = true
+        isEngineReady = true
+    }
+
     /// Start the Node.js process.
     func start() async throws {
         guard !isRunning else { return }

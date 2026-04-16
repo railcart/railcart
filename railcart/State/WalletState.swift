@@ -38,13 +38,13 @@ enum LockTimeout: String, CaseIterable, Identifiable {
     private static let defaultsKey = "lockTimeout"
 
     static var saved: LockTimeout {
-        guard let raw = Wallet.defaults.string(forKey: defaultsKey),
+        guard let raw = RailcartDefaults.store.string(forKey: defaultsKey),
               let value = LockTimeout(rawValue: raw) else { return .fiveMinutes }
         return value
     }
 
     static func save(_ value: LockTimeout) {
-        Wallet.defaults.set(value.rawValue, forKey: defaultsKey)
+        RailcartDefaults.store.set(value.rawValue, forKey: defaultsKey)
     }
 }
 
@@ -127,8 +127,8 @@ final class WalletState {
         wallets = newWallets
     }
 
-    func addWallet(using service: any WalletServiceProtocol) async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey),
+    func addWallet(using service: any WalletServiceProtocol, keychain: any KeychainProviding) async {
+        guard let encryptionKey = keychain.load(.encryptionKey),
               let firstWallet = wallets.first else { return }
 
         isAddingWallet = true

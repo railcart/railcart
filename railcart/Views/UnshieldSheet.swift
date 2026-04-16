@@ -14,6 +14,7 @@ struct UnshieldSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.walletService) private var service
     @Environment(\.balanceService) private var balanceService
+    @Environment(\.keychain) private var keychain
     @Environment(NodeBridge.self) private var bridge
     @Environment(NetworkState.self) private var network
     @Environment(TransactionStore.self) private var transactionStore
@@ -347,7 +348,7 @@ struct UnshieldSheet: View {
     // MARK: - Direct Unshield
 
     private func directUnshield() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             errorMessage = "Wallet not unlocked"
             return
         }
@@ -413,7 +414,7 @@ struct UnshieldSheet: View {
     // MARK: - Broadcaster Unshield
 
     private func loadBroadcasters() async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             errorMessage = "Wallet not unlocked"
             return
         }
@@ -518,7 +519,7 @@ struct UnshieldSheet: View {
     }
 
     private func selectBroadcaster(_ broadcaster: BroadcasterInfo) async {
-        guard let encryptionKey = KeychainHelper.load(.encryptionKey) else {
+        guard let encryptionKey = keychain.load(.encryptionKey) else {
             errorMessage = "Wallet not unlocked"
             return
         }
