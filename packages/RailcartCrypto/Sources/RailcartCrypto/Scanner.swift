@@ -28,11 +28,22 @@ public final class Scanner: @unchecked Sendable {
     private var utxoKeys: Set<String> = []
     /// Known nullifiers from the chain (for marking UTXOs as spent).
     private var knownNullifiers: Set<BigUInt> = []
+    /// Insertion-ordered shadow of `knownNullifiers`. Persistence appends only
+    /// the tail past `savedNullifierCount`, so the order has to be stable.
+    private var orderedNullifiers: [BigUInt] = []
+    /// How many entries of `orderedNullifiers` are already on disk.
+    private var savedNullifierCount: Int = 0
     /// Maps every nullifier to the Ethereum txid that emitted it. Used to
     /// derive a "tx X spent our UTXO Y which was created by tx Z" dependency
     /// graph for debugging. Backwards-compatible on load: older state files
     /// don't contain this map and we fall through to the bigint set above.
     private var nullifierTxids: [BigUInt: Data] = [:]
+    /// Insertion-ordered shadow of `nullifierTxids`, for incremental persistence.
+    private var orderedNullifierTxids: [(nullifier: BigUInt, txid: Data)] = []
+    /// How many entries of `orderedNullifierTxids` are already on disk.
+    private var savedNullifierTxidCount: Int = 0
+    /// How many entries of each tree's `pendingLeaves` are already on disk.
+    private var savedLeafCounts: [Int: Int] = [:]
     /// Last scanned block number.
     private(set) public var lastScannedBlock: Int = 0
 
@@ -57,8 +68,13 @@ public final class Scanner: @unchecked Sendable {
         // Process nullifiers first (so we can mark UTXOs as spent)
         for nullifier in events.nullifiers {
             let value = BigUInt(nullifier.nullifier)
-            knownNullifiers.insert(value)
-            nullifierTxids[value] = nullifier.txid
+            if knownNullifiers.insert(value).inserted {
+                orderedNullifiers.append(value)
+            }
+            if nullifierTxids[value] == nil {
+                nullifierTxids[value] = nullifier.txid
+                orderedNullifierTxids.append((nullifier: value, txid: nullifier.txid))
+            }
         }
 
         // Store commitment hashes for deferred merkle tree building.
@@ -586,22 +602,41 @@ public final class Scanner: @unchecked Sendable {
 
     // MARK: - Persistence Accessors
 
-    /// Expose known nullifiers for serialization.
-    var knownNullifiersList: Set<BigUInt> { knownNullifiers }
+    /// Insertion-ordered nullifiers for incremental serialization.
+    var orderedNullifiersList: [BigUInt] { orderedNullifiers }
 
-    /// Expose pending leaves for serialization.
+    /// Pending leaves for incremental serialization (per tree, in insertion order).
     var pendingLeavesList: [Int: [(position: Int, hash: Data)]] { pendingLeaves }
 
-    /// Expose nullifier → spending txid map for serialization.
-    var nullifierTxidsList: [BigUInt: Data] { nullifierTxids }
+    /// Insertion-ordered nullifier → txid pairs for incremental serialization.
+    var orderedNullifierTxidsList: [(nullifier: BigUInt, txid: Data)] { orderedNullifierTxids }
 
-    /// Restore state from a previous session.
+    /// Watermarks: how many entries of each list are already persisted.
+    var savedNullifierCountValue: Int { savedNullifierCount }
+    var savedNullifierTxidCountValue: Int { savedNullifierTxidCount }
+    var savedLeafCountsValue: [Int: Int] { savedLeafCounts }
+
+    /// Mark all in-memory state as flushed to disk. Called by the persistence
+    /// layer after a successful incremental save.
+    func markSaved() {
+        savedNullifierCount = orderedNullifiers.count
+        savedNullifierTxidCount = orderedNullifierTxids.count
+        for (tree, leaves) in pendingLeaves {
+            savedLeafCounts[tree] = leaves.count
+        }
+    }
+
+    /// Restore state from a previous session. Pass `markAsSaved: true` when the
+    /// data came from the on-disk layout already (so the next save only writes
+    /// the delta); pass `false` when migrating from a legacy format that needs
+    /// to be fully rewritten on first save.
     func restoreState(
         lastScannedBlock: Int,
         utxos: [UTXO],
-        nullifiers: Set<BigUInt>,
+        orderedNullifiers: [BigUInt],
+        orderedNullifierTxids: [(nullifier: BigUInt, txid: Data)],
         pendingLeaves: [Int: [(position: Int, hash: Data)]],
-        nullifierTxids: [BigUInt: Data] = [:]
+        markAsSaved: Bool
     ) {
         self.lastScannedBlock = lastScannedBlock
         // Dedupe by (tree, position) so existing saved state with duplicates
@@ -616,10 +651,22 @@ public final class Scanner: @unchecked Sendable {
         }
         self.utxos = unique
         self.utxoKeys = seen
-        self.knownNullifiers = nullifiers
+        self.orderedNullifiers = orderedNullifiers
+        self.knownNullifiers = Set(orderedNullifiers)
+        self.orderedNullifierTxids = orderedNullifierTxids
+        self.nullifierTxids = Dictionary(
+            orderedNullifierTxids.map { ($0.nullifier, $0.txid) },
+            uniquingKeysWith: { first, _ in first }
+        )
         self.pendingLeaves = pendingLeaves
-        self.nullifierTxids = nullifierTxids
         self.treesBuilt = false
+        if markAsSaved {
+            markSaved()
+        } else {
+            savedNullifierCount = 0
+            savedNullifierTxidCount = 0
+            savedLeafCounts = [:]
+        }
     }
 
     private func commitmentTreeInfo(_ commitment: ScanCommitment) -> (tree: Int, position: Int, hash: Data) {

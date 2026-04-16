@@ -79,9 +79,8 @@ final class NativeScannerService {
                 let stateURL = Self.scannerStateURL(walletID: walletID, chainName: chainName)
                 let scanner = await Task.detached(priority: .userInitiated) {
                     let s = RailcartCrypto.Scanner(keys: keys)
-                    if FileManager.default.fileExists(atPath: stateURL.path) {
-                        try? s.load(from: stateURL)
-                    }
+                    // load() handles missing-state and legacy migration internally.
+                    try? s.load(from: stateURL)
                     return s
                 }.value
                 if scanner.lastScannedBlock > 0 {
@@ -380,6 +379,9 @@ final class NativeScannerService {
             scanners.removeValue(forKey: scannerKey)
             let url = Self.scannerStateURL(walletID: walletID, chainName: chainName)
             try? FileManager.default.removeItem(at: url)
+            // Also clean up the legacy single-file format if it's still around.
+            let legacyURL = url.deletingPathExtension().appendingPathExtension("json")
+            try? FileManager.default.removeItem(at: legacyURL)
         }
         AppLogger.shared.log("native-scan", "Cleared scan state for \(chainName), will rescan from block 0")
     }
@@ -639,12 +641,16 @@ final class NativeScannerService {
         scanProgress = nil
     }
 
-    /// File URL for persisted scanner state (chain-specific).
+    /// Directory URL for persisted scanner state (chain-specific). Each scan
+    /// appends new nullifiers / leaves to per-type log files inside, and only
+    /// the small utxos.json + meta.json get rewritten. A legacy single-file
+    /// `{name}.json` may sit alongside this directory; the loader migrates it
+    /// transparently on first save.
     private nonisolated static func scannerStateURL(walletID: String, chainName: String) -> URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent(".railcart", isDirectory: true)
             .appendingPathComponent("native-scan", isDirectory: true)
-            .appendingPathComponent("\(walletID)-\(chainName).json")
+            .appendingPathComponent("\(walletID)-\(chainName)", isDirectory: true)
     }
 
     /// Standard BIP39 seed: PBKDF2-SHA512(mnemonic, "mnemonic" + passphrase).
