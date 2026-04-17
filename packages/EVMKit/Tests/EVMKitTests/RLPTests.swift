@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import RailcartChain
+@testable import EVMKit
 
 @Suite struct RLPTests {
     @Test func encodeSingleByte() {

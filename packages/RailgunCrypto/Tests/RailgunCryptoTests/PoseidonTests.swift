@@ -1,6 +1,6 @@
 import Testing
 import BigInt
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 /// Test vectors generated from @railgun-community/circomlibjs poseidon implementation.
 @Suite("Poseidon Hash")

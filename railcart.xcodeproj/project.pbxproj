@@ -7,9 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		D0A63CAF2F74A8DE0032498D /* RailcartChain in Frameworks */ = {isa = PBXBuildFile; productRef = D0A63CAE2F74A8DE0032498D /* RailcartChain */; };
+		D0A63CAF2F74A8DE0032498D /* EVMKit in Frameworks */ = {isa = PBXBuildFile; productRef = D0A63CAE2F74A8DE0032498D /* EVMKit */; };
 		D0CHAIN032F71C5D50008E08D /* (null) in Frameworks */ = {isa = PBXBuildFile; };
-		D0CRYPTO0100000000000001 /* RailcartCrypto in Frameworks */ = {isa = PBXBuildFile; productRef = D0CRYPTO0100000000000003 /* RailcartCrypto */; };
+		D0CRYPTO0100000000000001 /* RailgunCrypto in Frameworks */ = {isa = PBXBuildFile; productRef = D0CRYPTO0100000000000003 /* RailgunCrypto */; };
 		D0SPARKLE0100000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = D0SPARKLE0100000000000003 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -59,8 +59,8 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				D0A63CAF2F74A8DE0032498D /* RailcartChain in Frameworks */,
-				D0CRYPTO0100000000000001 /* RailcartCrypto in Frameworks */,
+				D0A63CAF2F74A8DE0032498D /* EVMKit in Frameworks */,
+				D0CRYPTO0100000000000001 /* RailgunCrypto in Frameworks */,
 				D0SPARKLE0100000000000001 /* Sparkle in Frameworks */,
 				D0CHAIN032F71C5D50008E08D /* (null) in Frameworks */,
 			);
@@ -132,8 +132,8 @@
 			);
 			name = railcart;
 			packageProductDependencies = (
-				D0A63CAE2F74A8DE0032498D /* RailcartChain */,
-				D0CRYPTO0100000000000003 /* RailcartCrypto */,
+				D0A63CAE2F74A8DE0032498D /* EVMKit */,
+				D0CRYPTO0100000000000003 /* RailgunCrypto */,
 				D0SPARKLE0100000000000003 /* Sparkle */,
 			);
 			productName = railcart;
@@ -219,8 +219,8 @@
 			mainGroup = D07847972F71C5D40008E08D;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */,
-				D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */,
+				D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/EVMKit" */,
+				D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailgunCrypto" */,
 				D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */,
 			);
 			preferredProjectObjectVersion = 77;
@@ -631,13 +631,13 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */ = {
+		D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/EVMKit" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = packages/RailcartChain;
+			relativePath = packages/EVMKit;
 		};
-		D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */ = {
+		D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailgunCrypto" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = packages/RailcartCrypto;
+			relativePath = packages/RailgunCrypto;
 		};
 		D0SPARKLE0100000000000002 /* XCLocalSwiftPackageReference "vendor/Sparkle" */ = {
 			isa = XCLocalSwiftPackageReference;
@@ -646,15 +646,15 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		D0A63CAE2F74A8DE0032498D /* RailcartChain */ = {
+		D0A63CAE2F74A8DE0032498D /* EVMKit */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/RailcartChain" */;
-			productName = RailcartChain;
+			package = D0A63CAC2F74A8500032498D /* XCLocalSwiftPackageReference "packages/EVMKit" */;
+			productName = EVMKit;
 		};
-		D0CRYPTO0100000000000003 /* RailcartCrypto */ = {
+		D0CRYPTO0100000000000003 /* RailgunCrypto */ = {
 			isa = XCSwiftPackageProductDependency;
-			package = D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailcartCrypto" */;
-			productName = RailcartCrypto;
+			package = D0CRYPTO0100000000000002 /* XCLocalSwiftPackageReference "packages/RailgunCrypto" */;
+			productName = RailgunCrypto;
 		};
 		D0SPARKLE0100000000000003 /* Sparkle */ = {
 			isa = XCSwiftPackageProductDependency;

@@ -10,7 +10,7 @@
 //
 
 import Foundation
-import RailcartCrypto
+import RailgunCrypto
 
 enum DemoScenario: String, CaseIterable {
     case emptyWallet = "empty-wallet"

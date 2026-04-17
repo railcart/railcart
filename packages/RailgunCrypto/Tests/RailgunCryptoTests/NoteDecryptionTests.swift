@@ -2,7 +2,7 @@ import Testing
 import BigInt
 import Foundation
 import CryptoKit
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 /// Test vectors generated from @railgun-community/engine and @noble/ed25519.
 @Suite("Note Decryption")

@@ -1,5 +1,5 @@
 import Testing
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 /// Tests for `POIStatusClassifier.bucket` — mirrors the decision tree in
 /// `@railgun-community/engine`'s `POI.getBalanceBucket`.

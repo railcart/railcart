@@ -13,7 +13,7 @@
 #if DEBUG
 
 import SwiftUI
-import RailcartCrypto
+import RailgunCrypto
 
 struct ProofsDebugView: View {
     @Environment(\.balanceService) private var balanceService

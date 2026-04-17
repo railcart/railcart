@@ -1,7 +1,7 @@
 import Testing
 import BigInt
 import Foundation
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 @Suite("Quick Sync")
 struct QuickSyncTests {

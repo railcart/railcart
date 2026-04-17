@@ -3,10 +3,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "RailcartCrypto",
+    name: "RailgunCrypto",
     platforms: [.macOS(.v15)],
     products: [
-        .library(name: "RailcartCrypto", targets: ["RailcartCrypto"]),
+        .library(name: "RailgunCrypto", targets: ["RailgunCrypto"]),
     ],
     dependencies: [
         .package(path: "../../vendor/BigInt"),
@@ -22,7 +22,7 @@ let package = Package(
             path: "../../vendor/rs-poseidon/RsPoseidon.xcframework"
         ),
         .target(
-            name: "RailcartCrypto",
+            name: "RailgunCrypto",
             dependencies: [
                 .product(name: "BigInt", package: "BigInt"),
                 "CSodium",
@@ -30,8 +30,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "RailcartCryptoTests",
-            dependencies: ["RailcartCrypto"]
+            name: "RailgunCryptoTests",
+            dependencies: ["RailgunCrypto"]
         ),
     ]
 )

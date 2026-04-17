@@ -3,10 +3,10 @@
 import PackageDescription
 
 let package = Package(
-    name: "RailcartChain",
+    name: "EVMKit",
     platforms: [.macOS(.v15)],
     products: [
-        .library(name: "RailcartChain", targets: ["RailcartChain"]),
+        .library(name: "EVMKit", targets: ["EVMKit"]),
     ],
     dependencies: [
         .package(path: "../../vendor/swift-secp256k1"),
@@ -14,7 +14,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "RailcartChain",
+            name: "EVMKit",
             dependencies: [
                 .product(name: "P256K", package: "swift-secp256k1"),
                 .product(name: "BigInt", package: "BigInt"),
@@ -24,8 +24,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "RailcartChainTests",
-            dependencies: ["RailcartChain"]
+            name: "EVMKitTests",
+            dependencies: ["EVMKit"]
         ),
     ]
 )

@@ -7,7 +7,7 @@
 //
 
 import SwiftUI
-import RailcartCrypto
+import RailgunCrypto
 
 struct WalletDetailView: View {
     @Environment(\.balanceService) private var balanceService

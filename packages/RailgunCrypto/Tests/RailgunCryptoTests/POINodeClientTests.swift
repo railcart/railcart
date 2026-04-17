@@ -1,6 +1,6 @@
 import Testing
 import Foundation
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 @Suite("POI Node Client")
 struct POINodeClientTests {

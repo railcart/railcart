@@ -1,6 +1,6 @@
 import Foundation
 import Observation
-import RailcartCrypto
+import RailgunCrypto
 import BigInt
 import CryptoKit
 import CommonCrypto
@@ -27,7 +27,7 @@ struct NativeScanProgress: Sendable {
 @Observable
 final class NativeScannerService {
     /// Per-wallet-chain scanners keyed by "walletID:chainName".
-    private var scanners: [String: RailcartCrypto.Scanner] = [:]
+    private var scanners: [String: RailgunCrypto.Scanner] = [:]
     /// Cached key sets keyed by walletID (keys are chain-independent).
     private var keySets: [String: RailgunKeyDerivation.KeySet] = [:]
     /// Creation block numbers per wallet, for skipping pre-creation history.
@@ -78,7 +78,7 @@ final class NativeScannerService {
             if scanners[scannerKey] == nil {
                 let stateURL = Self.scannerStateURL(walletID: walletID, chainName: chainName)
                 let scanner = await Task.detached(priority: .userInitiated) {
-                    let s = RailcartCrypto.Scanner(keys: keys)
+                    let s = RailgunCrypto.Scanner(keys: keys)
                     // load() handles missing-state and legacy migration internally.
                     try? s.load(from: stateURL)
                     return s
@@ -378,7 +378,7 @@ final class NativeScannerService {
     }
 
     /// Access the scanner for a wallet+chain (for proof assembly).
-    func getScanner(walletID: String, chainName: String) -> RailcartCrypto.Scanner? {
+    func getScanner(walletID: String, chainName: String) -> RailgunCrypto.Scanner? {
         scanners["\(walletID):\(chainName)"]
     }
 

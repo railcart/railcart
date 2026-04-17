@@ -1,7 +1,7 @@
 import Testing
 import BigInt
 import Foundation
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 /// Test vectors generated from @railgun-community/engine's BlindedCommitment
 /// class (see nodejs-project/node_modules/@railgun-community/engine/dist/poi/

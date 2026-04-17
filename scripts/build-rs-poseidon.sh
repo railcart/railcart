@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build the rs-poseidon Rust crate as a static library and package it
-# as an xcframework for use by the RailcartCrypto Swift package.
+# as an xcframework for use by the RailgunCrypto Swift package.
 #
 # Prerequisites: Rust toolchain (rustup.rs)
 # Usage: scripts/build-rs-poseidon.sh

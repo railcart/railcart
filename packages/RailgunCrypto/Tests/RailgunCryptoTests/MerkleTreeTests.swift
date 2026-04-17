@@ -1,6 +1,6 @@
 import Testing
 import BigInt
-@testable import RailcartCrypto
+@testable import RailgunCrypto
 
 @Suite("Poseidon Merkle Tree")
 struct MerkleTreeTests {
