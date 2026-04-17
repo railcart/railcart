@@ -13,6 +13,15 @@ import * as snarkjs from "snarkjs";
 import leveldown from "leveldown";
 import fs from "fs/promises";
 import path from "path";
+import { fileURLToPath } from "url";
+import { createRequire } from "module";
+
+// Direct file path to bypass the SDK package's "exports" restrictions.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const require = createRequire(import.meta.url);
+const { pollingProviderMap } = require(
+  path.join(__dirname, "..", "node_modules", "@railgun-community", "wallet", "dist", "services", "railgun", "core", "providers.js")
+);
 import { loadRemoteConfig, getCachedRemoteConfig } from "./remote-config.js";
 
 let engineInitialized = false;
@@ -379,6 +388,38 @@ export function registerEngineInitMethods() {
     const state = chainProviderState[chainName];
     const url = state.candidates[state.currentIndex].provider;
     return { chainName, rotated: true, providerUrl: url };
+  });
+
+  /**
+   * Pause all polling providers. Call when the app enters the background
+   * to stop recurring RPC requests.
+   */
+  registerMethod("pausePolling", async () => {
+    let paused = 0;
+    for (const [networkName, provider] of Object.entries(pollingProviderMap)) {
+      if (provider && !provider.paused) {
+        provider.pause();
+        paused++;
+        process.stderr.write(`[sync] Paused polling for ${networkName}\n`);
+      }
+    }
+    return { paused };
+  });
+
+  /**
+   * Resume all polling providers. Call when the app returns to the
+   * foreground.
+   */
+  registerMethod("resumePolling", async () => {
+    let resumed = 0;
+    for (const [networkName, provider] of Object.entries(pollingProviderMap)) {
+      if (provider && provider.paused) {
+        provider.resume();
+        resumed++;
+        process.stderr.write(`[sync] Resumed polling for ${networkName}\n`);
+      }
+    }
+    return { resumed };
   });
 
 }

@@ -4,6 +4,7 @@
 //
 //
 
+import Combine
 import SwiftUI
 
 @main
@@ -106,6 +107,14 @@ struct RailcartApp: App {
                     try? await networkState.ensureProviderLoaded(
                         for: networkState.selectedChain, using: walletService
                     )
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+                    guard bridge.isEngineReady else { return }
+                    Task { _ = try? await bridge.callRaw("pausePolling") }
+                }
+                .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+                    guard bridge.isEngineReady else { return }
+                    Task { _ = try? await bridge.callRaw("resumePolling") }
                 }
         }
         .commands {
