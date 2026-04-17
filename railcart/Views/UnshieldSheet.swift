@@ -418,7 +418,7 @@ struct UnshieldSheet: View {
             errorMessage = "Wallet not unlocked"
             return
         }
-        guard let weiAmount = parseAmountToWei() else {
+        guard parseAmountToWei() != nil else {
             errorMessage = "Invalid amount"
             return
         }
@@ -459,10 +459,10 @@ struct UnshieldSheet: View {
         broadcasterPollTask?.cancel()
         broadcasterPollTask = Task {
             let chain = network.selectedChain
-            var activeFeeToken = feeTokenAddress
+            let activeFeeToken = feeTokenAddress
             while !Task.isCancelled {
                 do {
-                    var result = try await bridge.call("getBroadcastersForToken", params: [
+                    let result = try await bridge.call("getBroadcastersForToken", params: [
                         "tokenAddress": activeFeeToken,
                         "useRelayAdapt": true,
                     ], as: BroadcasterListResponse.self)

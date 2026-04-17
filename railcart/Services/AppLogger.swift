@@ -13,7 +13,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class AppLogger {
-    static let shared = AppLogger()
+    nonisolated static let shared = AppLogger()
 
     /// Recent log entries for the UI (capped to avoid memory growth).
     private(set) var entries: [LogEntry] = []
@@ -21,7 +21,7 @@ final class AppLogger {
 
     let logFileURL: URL?
     private let fileHandle: FileHandle?
-    static let dateFormatter: DateFormatter = {
+    nonisolated static let dateFormatter: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm:ss.SSS"
         return f
@@ -38,7 +38,7 @@ final class AppLogger {
         }
     }
 
-    private init() {
+    private nonisolated init() {
         let logDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
             .appendingPathComponent("app.railcart.macos", isDirectory: true)
         try? FileManager.default.createDirectory(at: logDir, withIntermediateDirectories: true)
@@ -59,7 +59,10 @@ final class AppLogger {
         fileHandle = try? FileHandle(forWritingTo: logFile)
         fileHandle?.seekToEndOfFile()
 
-        log("system", "Logger started — writing to \(logFile.path)")
+        let startLine = "[\(Self.dateFormatter.string(from: Date()))] [system] Logger started — writing to \(logFile.path)\n"
+        if let data = startLine.data(using: .utf8) {
+            fileHandle?.write(data)
+        }
     }
 
     deinit {
@@ -83,7 +86,7 @@ final class AppLogger {
 // MARK: - Environment Key
 
 private struct AppLoggerKey: EnvironmentKey {
-    @MainActor static let defaultValue: AppLogger = .shared
+    static let defaultValue: AppLogger = .shared
 }
 
 extension EnvironmentValues {

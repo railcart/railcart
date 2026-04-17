@@ -619,7 +619,7 @@ final class NativeScannerService {
     /// Thread-safe counter for parallel fetch progress.
     private final class FetchCounts: Sendable {
         private let lock = NSLock()
-        private var counts: [String: Int] = [:]
+        nonisolated(unsafe) private var counts: [String: Int] = [:]
 
         func update(type: String, count: Int) {
             lock.lock()
@@ -674,7 +674,7 @@ final class NativeScannerService {
         let salt = ("mnemonic" + passphrase).data(using: .utf8)!
 
         var derivedKey = Data(count: 64)
-        derivedKey.withUnsafeMutableBytes { derivedKeyPtr in
+        _ = derivedKey.withUnsafeMutableBytes { derivedKeyPtr in
             salt.withUnsafeBytes { saltPtr in
                 password.withUnsafeBytes { passwordPtr in
                     CCKeyDerivationPBKDF(

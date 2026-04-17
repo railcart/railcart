@@ -159,10 +159,12 @@ struct BroadcasterListView: View {
         errorMessage = nil
         broadcasterState.broadcasters = []
 
-        bridge.onEvent("broadcasterStatus") { data in
+        bridge.onEvent("broadcasterStatus") { [broadcasterState] data in
             if let dict = data as? [String: Any],
                let status = dict["status"] as? String {
-                broadcasterState.connectionStatus = status
+                Task { @MainActor in
+                    broadcasterState.connectionStatus = status
+                }
             }
         }
 

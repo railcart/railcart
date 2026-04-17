@@ -11,6 +11,7 @@ struct SettingsView: View {
     @Environment(NetworkState.self) private var network
     @Environment(WalletState.self) private var walletState
     @Environment(\.walletService) private var service
+    @Environment(\.balanceService) private var balanceService
 
     @State private var rpcURLs: [Chain: String] = [:]
     @State private var savedChains: Set<Chain> = []
@@ -126,7 +127,8 @@ struct SettingsView: View {
             network.setCustomRPCURL(text, for: chain)
         }
         network.invalidateProvider(for: chain)
+        balanceService?.invalidateChain(chain.rawValue)
         try? await network.ensureProviderLoaded(for: chain, using: service)
-        withAnimation { savedChains.insert(chain) }
+        _ = withAnimation { savedChains.insert(chain) }
     }
 }

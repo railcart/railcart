@@ -16,7 +16,7 @@ import BigInt
 // MARK: - Environment Key
 
 private struct WalletServiceKey: EnvironmentKey {
-    @MainActor static let defaultValue: any WalletServiceProtocol = UnimplementedWalletService()
+    nonisolated static let defaultValue: any WalletServiceProtocol = UnimplementedWalletService()
 }
 
 extension EnvironmentValues {
@@ -27,7 +27,7 @@ extension EnvironmentValues {
 }
 
 /// Crashes on any call — ensures we always inject a real implementation.
-struct UnimplementedWalletService: WalletServiceProtocol {
+nonisolated struct UnimplementedWalletService: WalletServiceProtocol {
     func validateMnemonic(_ mnemonic: String) async throws -> MnemonicValidation { fatalError() }
     func generateMnemonic() async throws -> String { fatalError() }
     func deriveEncryptionKey(password: String, salt: String) async throws -> String { fatalError() }

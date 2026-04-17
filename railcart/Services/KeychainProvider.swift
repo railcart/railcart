@@ -51,7 +51,7 @@ final class DemoKeychainProvider: KeychainProviding {
 }
 
 /// Crashes on any call — guarantees we always inject a real implementation.
-struct UnimplementedKeychainProvider: KeychainProviding {
+nonisolated struct UnimplementedKeychainProvider: KeychainProviding {
     func save(_ key: KeychainHelper.Key, value: String) throws { fatalError("KeychainProvider not injected") }
     func load(_ key: KeychainHelper.Key) -> String? { fatalError("KeychainProvider not injected") }
     func delete(_ key: KeychainHelper.Key) { fatalError("KeychainProvider not injected") }
@@ -61,7 +61,7 @@ struct UnimplementedKeychainProvider: KeychainProviding {
 }
 
 private struct KeychainProviderKey: EnvironmentKey {
-    @MainActor static let defaultValue: any KeychainProviding = UnimplementedKeychainProvider()
+    nonisolated static let defaultValue: any KeychainProviding = UnimplementedKeychainProvider()
 }
 
 extension EnvironmentValues {
