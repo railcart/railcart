@@ -303,26 +303,28 @@ struct WalletDetailView: View {
                 .map { (Self.normalizedTxHash($0.txHash), $0) }
         )
 
-        var rows: [PendingPOIRow] = []
+        var scannerRows: [(row: PendingPOIRow, block: Int)] = []
 
         // Scanner-derived entries (authoritative).
         for entry in entries {
             let rowID = "scan-\(entry.id)"
-            // Prefer countdown for shields with a known submit time.
+            let row: PendingPOIRow
             if entry.isShield, let tx = localShieldsByTxid[entry.txid] {
-                rows.append(makeRow(id: rowID, from: entry, indicator: .countdown(since: tx.timestamp)))
+                row = makeRow(id: rowID, from: entry, indicator: .countdown(since: tx.timestamp))
             } else {
                 let (label, image) = bucketPresentation(entry.bucket)
-                rows.append(makeRow(id: rowID, from: entry, indicator: .status(label, systemImage: image)))
+                row = makeRow(id: rowID, from: entry, indicator: .status(label, systemImage: image))
             }
+            scannerRows.append((row, entry.blockNumber))
         }
 
         // Local shields the scanner hasn't indexed yet — keep 1h countdown fallback.
+        var localRows: [(row: PendingPOIRow, timestamp: Date)] = []
         let cutoff = Date().addingTimeInterval(-3600)
         for (txid, tx) in localShieldsByTxid where !knownTxids.contains(txid) {
             if tx.timestamp <= cutoff { continue }
             let token = Token.supported.first { $0.symbol == tx.tokenSymbol } ?? .eth
-            rows.append(PendingPOIRow(
+            let row = PendingPOIRow(
                 id: "local-\(chain)-\(txid)",
                 token: token,
                 tokenDisplay: tx.tokenSymbol,
@@ -331,10 +333,17 @@ struct WalletDetailView: View {
                 actionColor: .blue,
                 txHash: tx.txHash,
                 indicator: .countdown(since: tx.timestamp)
-            ))
+            )
+            localRows.append((row, tx.timestamp))
         }
 
-        return rows
+        // Newest-first within each bucket; un-indexed local shields float above
+        // scanner rows since they represent a just-submitted user action the
+        // scanner hasn't caught yet. Deterministic order — prevents the list
+        // from reshuffling on every scan.
+        let sortedLocal = localRows.sorted { $0.timestamp > $1.timestamp }.map(\.row)
+        let sortedScanner = scannerRows.sorted { $0.block > $1.block }.map(\.row)
+        return sortedLocal + sortedScanner
     }
 
     private func makeRow(
