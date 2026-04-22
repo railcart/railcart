@@ -9,8 +9,10 @@ import SwiftUI
 
 struct ImportWalletView: View {
     @Environment(\.walletService) private var service
+    @Environment(\.balanceService) private var balanceService
     @Environment(\.keychain) private var keychain
     @Environment(WalletState.self) private var walletState
+    @Environment(NetworkState.self) private var network
     @Environment(\.dismiss) private var dismiss
 
     @State private var mnemonicInput = ""
@@ -148,6 +150,19 @@ struct ImportWalletView: View {
             )
             walletState.addWallet(newWallet, unlocked: unlocked)
             dismiss()
+
+            // Imported wallets have no creation block, so the scanner starts from
+            // block 0 — a full history rescan needed to discover any prior UTXOs.
+            // Scoped to just the new wallet so existing wallets aren't dragged
+            // through a redundant rescan.
+            if let balanceService {
+                let chain = network.selectedChain
+                try? await network.ensureProviderLoaded(for: chain, using: service)
+                await balanceService.scanAllPrivateBalances(
+                    chainName: chain.rawValue,
+                    wallets: [newWallet]
+                )
+            }
         } catch {
             errorMessage = "Import failed: \(error.localizedDescription)"
         }
