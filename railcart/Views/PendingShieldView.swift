@@ -45,6 +45,11 @@ struct PendingShieldView: View {
     /// User-initiated "Submit POI proofs" trigger. Nil hides the button.
     var onGenerateProofs: (() -> Void)? = nil
 
+    /// Flips true the instant the user taps Submit/Retry, so the button
+    /// disables immediately instead of waiting for the async `proofGen`
+    /// transition to `.running` to catch up.
+    @State private var isSubmitting: Bool = false
+
     var body: some View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             VStack(spacing: 8) {
@@ -63,6 +68,9 @@ struct PendingShieldView: View {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(.yellow.opacity(0.06))
                     .strokeBorder(.yellow.opacity(0.2), lineWidth: 1)
+            }
+            .onChange(of: proofGen) { _, _ in
+                isSubmitting = false
             }
         }
     }
@@ -96,8 +104,7 @@ struct PendingShieldView: View {
                 }
                 Spacer()
                 if let onGenerateProofs {
-                    Button("Submit", action: onGenerateProofs)
-                        .controlSize(.small)
+                    submitButton(label: "Submit", action: onGenerateProofs)
                 }
             case .running(let progress, let message):
                 ProgressView().controlSize(.small)
@@ -131,14 +138,29 @@ struct PendingShieldView: View {
                 }
                 Spacer()
                 if let onGenerateProofs {
-                    Button("Retry", action: onGenerateProofs)
-                        .controlSize(.small)
+                    submitButton(label: "Retry", action: onGenerateProofs)
                 }
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(.fill.quinary, in: RoundedRectangle(cornerRadius: 8))
+    }
+
+    @ViewBuilder
+    private func submitButton(label: String, action: @escaping () -> Void) -> some View {
+        Button {
+            isSubmitting = true
+            action()
+        } label: {
+            if isSubmitting {
+                ProgressView().controlSize(.mini)
+            } else {
+                Text(label)
+            }
+        }
+        .controlSize(.small)
+        .disabled(isSubmitting)
     }
 
     /// Hint shown under "POI proofs submitted" so users know roughly when to
