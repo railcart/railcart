@@ -263,9 +263,22 @@ struct PendingShieldView: View {
                     Text(formattedAmount(for: row))
                         .font(.caption.monospaced().bold())
                 }
-                Text(shortHash(row.txHash))
-                    .font(.caption2.monospaced())
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 4) {
+                    Text(shortHash(row.txHash))
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .textSelection(.enabled)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(row.txHash, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Copy transaction hash")
+                }
             }
 
             Spacer()
