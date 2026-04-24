@@ -17,6 +17,7 @@ struct PrivateBalanceSection: View {
     let errorMessage: String?
     let onRefresh: () -> Void
     var onUnshield: ((Token) -> Void)? = nil
+    var onTransfer: ((Token) -> Void)? = nil
     var isTokenStale: (Token) -> Bool = { _ in false }
 
     var body: some View {
@@ -81,10 +82,13 @@ struct PrivateBalanceSection: View {
                     TokenRow(
                         token: token,
                         balance: displayBalance,
-                        action: .unshield,
+                        action: .transfer,
                         actionState: state,
+                        secondaryAction: .unshield,
+                        secondaryActionState: state,
                         isStale: stale,
-                        onAction: { onUnshield?(token) }
+                        onAction: { onTransfer?(token) },
+                        onSecondaryAction: { onUnshield?(token) }
                     )
                 }
 

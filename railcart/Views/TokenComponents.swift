@@ -50,11 +50,13 @@ struct TokenIconView: View {
 enum TokenCellAction {
     case shield      // public → private
     case unshield    // private → public/elsewhere
+    case transfer    // private → private (zk → zk)
 
     var systemImage: String {
         switch self {
         case .shield: "arrow.down"
         case .unshield: "arrow.up.right"
+        case .transfer: "paperplane.fill"
         }
     }
 
@@ -62,6 +64,7 @@ enum TokenCellAction {
         switch self {
         case .shield: "Shield"
         case .unshield: "Unshield"
+        case .transfer: "Send"
         }
     }
 }
@@ -78,8 +81,11 @@ struct TokenRow: View {
     let balance: String?
     var action: TokenCellAction? = nil
     var actionState: TokenActionState = .hidden
+    var secondaryAction: TokenCellAction? = nil
+    var secondaryActionState: TokenActionState = .hidden
     var isStale: Bool = false
     var onAction: (() -> Void)? = nil
+    var onSecondaryAction: (() -> Void)? = nil
 
     var body: some View {
         HStack(spacing: 10) {
@@ -105,8 +111,13 @@ struct TokenRow: View {
                         .foregroundStyle(isStale ? .secondary : .primary)
                         .lineLimit(1)
                 }
-                if let action, actionState != .hidden {
-                    actionPill(action, state: actionState, action: onAction)
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let secondaryAction, secondaryActionState != .hidden {
+                        actionPill(secondaryAction, state: secondaryActionState, action: onSecondaryAction)
+                    }
+                    if let action, actionState != .hidden {
+                        actionPill(action, state: actionState, action: onAction)
+                    }
                 }
             }
         }

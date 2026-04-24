@@ -223,7 +223,7 @@ final class NodeBridge {
 
     /// Remove sensitive values from params before logging.
     private static func sanitizeParams(_ params: [String: any Sendable]) -> String {
-        let sensitiveKeys: Set<String> = ["privateKey", "encryptionKey", "mnemonic", "password"]
+        let sensitiveKeys: Set<String> = ["privateKey", "encryptionKey", "mnemonic", "password", "recipientRailgunAddress"]
         var parts: [String] = []
         for (key, value) in params {
             if sensitiveKeys.contains(key) {

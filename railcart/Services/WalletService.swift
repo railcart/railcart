@@ -53,6 +53,10 @@ nonisolated struct UnimplementedWalletService: WalletServiceProtocol {
     func unshieldERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, privateKey: String, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func estimateBroadcasterFeeERC20(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, feePerUnitGas: String, feeTokenAddress: String) async throws -> BroadcasterFeeEstimate { fatalError() }
     func unshieldERC20ViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, nativeScanner: NativeScannerService, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
+    func validateRailgunAddress(_ address: String) async throws -> Bool { fatalError() }
+    func transferPrivate(chainName: String, walletID: String, encryptionKey: String, recipientRailgunAddress: String, tokenAddress: String, amount: String, privateKey: String, nativeScanner: NativeScannerService, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
+    func estimateBroadcasterFeeTransfer(chainName: String, tokenAddress: String, feePerUnitGas: String) async throws -> BroadcasterFeeEstimate { fatalError() }
+    func transferPrivateViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, recipientRailgunAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, nativeScanner: NativeScannerService, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { fatalError() }
     func waitForTransaction(chainName: String, txHash: String) async throws { fatalError() }
     func loadChainProvider(chainName: String, providerUrl: String) async throws { fatalError() }
     func loadChainProviderFromRemoteConfig(chainName: String) async throws { fatalError() }
@@ -253,6 +257,37 @@ protocol WalletServiceProtocol: Sendable {
     func unshieldERC20ViaBroadcaster(
         chainName: String, walletID: String, encryptionKey: String,
         toAddress: String, tokenAddress: String, amount: String,
+        broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate,
+        feeTokenAddress: String,
+        nativeScanner: NativeScannerService,
+        onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String
+
+    // Private-to-private transfers (zk → zk)
+    func validateRailgunAddress(_ address: String) async throws -> Bool
+
+    func transferPrivate(
+        chainName: String,
+        walletID: String,
+        encryptionKey: String,
+        recipientRailgunAddress: String,
+        tokenAddress: String,
+        amount: String,
+        privateKey: String,
+        nativeScanner: NativeScannerService,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String
+
+    func estimateBroadcasterFeeTransfer(
+        chainName: String,
+        tokenAddress: String,
+        feePerUnitGas: String
+    ) async throws -> BroadcasterFeeEstimate
+
+    func transferPrivateViaBroadcaster(
+        chainName: String, walletID: String, encryptionKey: String,
+        recipientRailgunAddress: String, tokenAddress: String, amount: String,
         broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate,
         feeTokenAddress: String,
         nativeScanner: NativeScannerService,
@@ -1066,6 +1101,190 @@ final class LiveWalletService: WalletServiceProtocol {
         }
 
         // Step 3: Submit to broadcaster via Waku
+        onStep(.submittingToBroadcaster)
+        struct SubmitResponse: Decodable { let txHash: String }
+        let submitResult = try await bridge.call("submitBroadcasterTransaction", params: [
+            "chainName": chainName,
+            "to": to,
+            "data": data,
+            "broadcasterRailgunAddress": broadcaster.railgunAddress,
+            "broadcasterFeesID": broadcaster.feesID,
+            "nullifiers": nullifiers,
+            "overallBatchMinGasPrice": freshGasPrice,
+            "useRelayAdapt": false,
+            "preTransactionPOIsPerTxidLeafPerList": pois,
+        ] as [String: any Sendable], as: SubmitResponse.self, timeout: .seconds(120))
+
+        return submitResult.txHash
+    }
+
+    // MARK: - Private-to-Private Transfer (zk → zk)
+
+    func validateRailgunAddress(_ address: String) async throws -> Bool {
+        struct Response: Decodable { let valid: Bool }
+        let result = try await bridge.call("validateRailgunAddress", params: [
+            "address": address,
+        ], as: Response.self)
+        return result.valid
+    }
+
+    func transferPrivate(
+        chainName: String,
+        walletID: String,
+        encryptionKey: String,
+        recipientRailgunAddress: String,
+        tokenAddress: String,
+        amount: String,
+        privateKey: String,
+        nativeScanner: NativeScannerService,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String {
+        bridge.onEvent("proofProgress") { data in
+            if let dict = data as? [String: Any],
+               let progress = dict["progress"] as? Double {
+                onProofProgress(min(max(progress, 0), 1))
+            }
+        }
+
+        guard let scanner = nativeScanner.getScanner(walletID: walletID, chainName: chainName) else {
+            throw NSError(domain: "NativeTransfer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scanner not initialized"])
+        }
+
+        let poiActive = Chain(rawValue: chainName)?.isPOIActive ?? false
+        let proofInputs = try await Task.detached(priority: .userInitiated) {
+            try ProofAssembler.assembleUnshield(
+                scanner: scanner,
+                tokenAddress: tokenAddress,
+                amount: BigUInt(amount) ?? 0,
+                poiActive: poiActive
+            )
+        }.value
+
+        var bridgeParams = proofInputs.toBridgeJSON()
+        bridgeParams["chainName"] = chainName
+        bridgeParams["railgunWalletID"] = walletID
+        bridgeParams["encryptionKey"] = encryptionKey
+        bridgeParams["recipientRailgunAddress"] = recipientRailgunAddress
+        bridgeParams["sendWithPublicWallet"] = true
+
+        let result = try await bridge.call(
+            "generateTransferProofNative",
+            params: bridgeParams,
+            as: ShieldTransactionResponse.self,
+            timeout: .seconds(300)
+        )
+
+        return try await signAndSend(
+            chainName: chainName,
+            privateKey: privateKey,
+            txData: result.transaction
+        )
+    }
+
+    func estimateBroadcasterFeeTransfer(
+        chainName: String,
+        tokenAddress: String,
+        feePerUnitGas: String
+    ) async throws -> BroadcasterFeeEstimate {
+        // Bypass SDK UTXO selection (native scanner is the source of truth).
+        // Same manual formula the ERC-20 unshield broadcaster path uses.
+        struct Response: Decodable {
+            let gasEstimate: String
+            let broadcasterFeeAmount: String
+            let gasPrice: String
+        }
+        let result = try await bridge.call("gasEstimateForBroadcasterTransfer", params: [
+            "chainName": chainName,
+            "feePerUnitGas": feePerUnitGas,
+            "feeTokenAddress": tokenAddress,
+        ], as: Response.self)
+        return BroadcasterFeeEstimate(
+            gasEstimate: result.gasEstimate,
+            broadcasterFeeAmount: result.broadcasterFeeAmount,
+            gasPrice: result.gasPrice
+        )
+    }
+
+    func transferPrivateViaBroadcaster(
+        chainName: String, walletID: String, encryptionKey: String,
+        recipientRailgunAddress: String, tokenAddress: String, amount: String,
+        broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate,
+        feeTokenAddress: String,
+        nativeScanner: NativeScannerService,
+        onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void,
+        onProofProgress: @escaping @Sendable (Double) -> Void
+    ) async throws -> String {
+        bridge.onEvent("proofProgress") { data in
+            if let dict = data as? [String: Any],
+               let progress = dict["progress"] as? Double {
+                onProofProgress(min(max(progress, 0), 1))
+            }
+        }
+
+        onStep(.generatingProof)
+
+        guard let scanner = nativeScanner.getScanner(walletID: walletID, chainName: chainName) else {
+            throw NSError(domain: "NativeTransfer", code: 1, userInfo: [NSLocalizedDescriptionKey: "Scanner not initialized"])
+        }
+
+        // Select enough UTXOs to cover transfer amount + broadcaster fee.
+        let transferWei = BigUInt(amount) ?? 0
+        let feeWei = BigUInt(feeEstimate.broadcasterFeeAmount) ?? 0
+        let needed = transferWei + feeWei
+
+        let poiActive = Chain(rawValue: chainName)?.isPOIActive ?? false
+        let proofInputs = try await Task.detached(priority: .userInitiated) {
+            try ProofAssembler.assembleUnshield(
+                scanner: scanner,
+                tokenAddress: tokenAddress,
+                amount: needed,
+                poiActive: poiActive
+            )
+        }.value
+
+        // Fresh gas price with 20% buffer to avoid base fee rejection at submit time.
+        struct GasPriceResponse: Decodable { let gasPrice: String }
+        let gasPriceResult = try await bridge.call("getGasPrice", params: [
+            "chainName": chainName,
+        ], as: GasPriceResponse.self)
+        let freshGasPrice: String
+        if let gp = BigUInt(gasPriceResult.gasPrice) {
+            freshGasPrice = String(gp * 120 / 100)
+        } else {
+            freshGasPrice = feeEstimate.gasPrice
+        }
+
+        var bridgeParams = proofInputs.toBridgeJSON()
+        // `toBridgeJSON` serializes the amount we passed to ProofAssembler
+        // (transfer + fee). The Node side needs the pure transfer amount to
+        // size the recipient note; overwrite it here.
+        bridgeParams["amount"] = String(transferWei)
+        bridgeParams["chainName"] = chainName
+        bridgeParams["railgunWalletID"] = walletID
+        bridgeParams["encryptionKey"] = encryptionKey
+        bridgeParams["recipientRailgunAddress"] = recipientRailgunAddress
+        bridgeParams["sendWithPublicWallet"] = false
+        bridgeParams["broadcasterFeeTokenAddress"] = feeTokenAddress
+        bridgeParams["broadcasterFeeAmount"] = feeEstimate.broadcasterFeeAmount
+        bridgeParams["broadcasterRailgunAddress"] = broadcaster.railgunAddress
+        bridgeParams["overallBatchMinGasPrice"] = freshGasPrice
+
+        let result = try await bridge.callRaw(
+            "generateTransferProofNative",
+            params: bridgeParams,
+            timeout: .seconds(300)
+        )
+
+        guard let resultDict = result as? [String: Any],
+              let txDict = resultDict["transaction"] as? [String: Any],
+              let to = txDict["to"] as? String,
+              let data = txDict["data"] as? String,
+              let nullifiers = resultDict["nullifiers"] as? [String],
+              let pois = resultDict["preTransactionPOIsPerTxidLeafPerList"]
+        else {
+            throw NodeBridgeError.decodingError("Failed to decode native transfer response")
+        }
+
         onStep(.submittingToBroadcaster)
         struct SubmitResponse: Decodable { let txHash: String }
         let submitResult = try await bridge.call("submitBroadcasterTransaction", params: [

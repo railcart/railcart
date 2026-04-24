@@ -83,6 +83,12 @@ struct MockWalletService: WalletServiceProtocol {
         BroadcasterFeeEstimate(gasEstimate: "1500000", broadcasterFeeAmount: "150000000000000", gasPrice: "30000000000")
     }
     func unshieldERC20ViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, toAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, nativeScanner: NativeScannerService, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+    func validateRailgunAddress(_ address: String) async throws -> Bool { address.hasPrefix("0zk1q") }
+    func transferPrivate(chainName: String, walletID: String, encryptionKey: String, recipientRailgunAddress: String, tokenAddress: String, amount: String, privateKey: String, nativeScanner: NativeScannerService, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
+    func estimateBroadcasterFeeTransfer(chainName: String, tokenAddress: String, feePerUnitGas: String) async throws -> BroadcasterFeeEstimate {
+        BroadcasterFeeEstimate(gasEstimate: "1500000", broadcasterFeeAmount: "150000000000000", gasPrice: "30000000000")
+    }
+    func transferPrivateViaBroadcaster(chainName: String, walletID: String, encryptionKey: String, recipientRailgunAddress: String, tokenAddress: String, amount: String, broadcaster: BroadcasterInfo, feeEstimate: BroadcasterFeeEstimate, feeTokenAddress: String, nativeScanner: NativeScannerService, onStep: @escaping @Sendable (BroadcasterUnshieldStep) -> Void, onProofProgress: @escaping @Sendable (Double) -> Void) async throws -> String { "0xmocktxhash" }
     func waitForTransaction(chainName: String, txHash: String) async throws {}
 
     func loadChainProvider(chainName: String, providerUrl: String) async throws {}

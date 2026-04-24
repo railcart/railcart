@@ -18,6 +18,7 @@ import {
   populateProvedUnshield,
   gasEstimateForUnprovenUnshieldBaseToken,
   gasEstimateForUnprovenUnshield,
+  validateRailgunAddress,
   getWalletMnemonic,
 } from "@railgun-community/wallet";
 import crypto from "crypto";
@@ -1309,4 +1310,67 @@ export function registerWalletMethods() {
     };
     });
   });
+
+  // -----------------------------------------------------------------------
+  // Private-to-private transfer methods (zk → zk)
+  //
+  // Note: proof generation + transaction population for transfers lives in
+  // `native-proof.js` (generateTransferProofNative) because this app uses a
+  // native Swift scanner. The SDK wallet's UTXO set is not populated, so
+  // SDK-based generateTransferProof/populateProvedTransfer would fail with
+  // "insufficient balance". We only need SDK-backed helpers here:
+  //   - validateRailgunAddress (pure static check)
+  //   - gasEstimateForBroadcasterTransfer (manual formula, no UTXO lookup)
+  // -----------------------------------------------------------------------
+
+  /**
+   * Validate a RAILGUN (0zk) address via the SDK.
+   *
+   * params: { address: string }
+   */
+  registerMethod("validateRailgunAddress", async (params) => {
+    const { address } = params;
+    if (typeof address !== "string" || address.length === 0) {
+      return { valid: false };
+    }
+    return { valid: validateRailgunAddress(address) };
+  });
+
+  /**
+   * Estimate the broadcaster fee for a private-to-private transfer.
+   * Uses the same manual formula as the ERC-20 unshield broadcaster path
+   * (bypasses SDK UTXO selection, which requires an SDK scan that this app
+   * does not run).
+   *
+   * params: { chainName, feePerUnitGas, feeTokenAddress }
+   */
+  registerMethod("gasEstimateForBroadcasterTransfer", async (params) => {
+    requireEngine();
+    const { chainName, feePerUnitGas } = params;
+    const { networkName } = chainForName(chainName);
+
+    // Transfers have 1 fewer commitment than unshields (no unshield note) but
+    // circuit size dominates — stay with a conservative 420k estimate.
+    const TRANSFER_GAS_ESTIMATE = 420_000n;
+    const ONE_UNIT_GAS = 10n ** 18n;
+
+    return withProviderRetry(chainName, async () => {
+      const provider = getFallbackProviderForNetwork(networkName);
+      const latestBlock = await provider.getBlock("latest");
+      const baseFee = latestBlock?.baseFeePerGas ?? 0n;
+      const tipCap = 1_000_000_000n; // 1 gwei priority fee
+      const gasPrice = baseFee * 2n + tipCap;
+      const bufferedGasPrice = gasPrice + gasPrice / 2n;
+      const gasLimit = TRANSFER_GAS_ESTIMATE + TRANSFER_GAS_ESTIMATE / 10n;
+      const maximumGas = gasLimit * bufferedGasPrice;
+      const broadcasterFeeAmount = (BigInt(feePerUnitGas) * maximumGas) / ONE_UNIT_GAS;
+
+      return {
+        gasEstimate: TRANSFER_GAS_ESTIMATE.toString(),
+        broadcasterFeeAmount: broadcasterFeeAmount.toString(),
+        gasPrice: gasPrice.toString(),
+      };
+    });
+  });
+
 }

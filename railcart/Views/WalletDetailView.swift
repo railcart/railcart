@@ -24,6 +24,7 @@ struct WalletDetailView: View {
     // Shield/unshield sheets keyed by token symbol (so SwiftUI re-presents on change).
     @State private var shieldToken: Token?
     @State private var unshieldToken: Token?
+    @State private var transferToken: Token?
 
     // Public balances
     @State private var ethBalance: String?
@@ -114,6 +115,7 @@ struct WalletDetailView: View {
                         errorMessage: nil,
                         onRefresh: { Task { await refreshPrivateBalances() } },
                         onUnshield: { token in unshieldToken = token },
+                        onTransfer: { token in transferToken = token },
                         isTokenStale: { token in
                             guard let addr = token.address(on: network.selectedChain) else { return false }
                             return balanceService?.isTokenStale(
@@ -150,6 +152,9 @@ struct WalletDetailView: View {
         }
         .sheet(item: $unshieldToken) { token in
             UnshieldSheet(token: token, wallet: wallet, unlocked: unlocked)
+        }
+        .sheet(item: $transferToken) { token in
+            TransferSheet(token: token, wallet: wallet, unlocked: unlocked)
         }
     }
 
